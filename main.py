@@ -27,7 +27,7 @@ from util import load_model
 EPOCHS = 50
 HISTORICAL_EPOCHS = -1
 SAVE_EVERY = 5
-BATCH_SIZE = 4
+BATCH_SIZE = 2
 LR = 1e-4
 
 # OUTPUT_MODEL_PATH: 输出的模型路径
