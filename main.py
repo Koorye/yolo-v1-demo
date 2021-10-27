@@ -21,6 +21,12 @@ CLASSES = ['person', 'bird', 'cat', 'cow', 'dog', 'horse', 'sheep',
            'aeroplane', 'bicycle', 'boat', 'bus', 'car', 'motorbike', 'train',
            'bottle', 'chair', 'dining table', 'potted plant', 'sofa', 'tvmonitor']
 
+if not os.path.exists(OUTPUT_IMG_PATH):
+    os.makedirs(OUTPUT_IMG_PATH)
+
+if not os.path.exists(OUTPUT_MODEL_PATH):
+    os.makedirs(OUTPUT_MODEL_PATH)
+
 if torch.cuda.is_available():
     print('CUDA已启用')
     device = torch.device('cuda')
