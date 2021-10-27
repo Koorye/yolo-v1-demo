@@ -1,3 +1,9 @@
+#!/usr/bin/env python
+# --*-- encoding: utf-8 --*--
+# @Author: Koorye
+# @Date: 2021-10-27
+# @Desc: Yolo V1的训练、测试、可视化和保存
+
 import os
 import torch
 from torch.utils.data import DataLoader
@@ -5,28 +11,36 @@ from tqdm import tqdm
 import visdom
 
 from dataset import VOCDataset
-from yolo_v1 import YoloV1
+from util import load_model
 from yolo_v1_loss_vectorization import YoloV1Loss
 
-EPOCHS = 100
-HISTORICAL_EPOCHS = 0
-SAVE_EVERY = 1
-BATCH_SIZE = 1
-LR = 1e-5
-BETAS = (.5, .999)
+# 初始化参数
+# EPOCHS: 总的训练次数
+# HISTORICAL_EPOCHS: 历史训练次数，用于模型的加载
+# - -1表示最近一次训练的模型
+# - 0表示不加载历史模型
+# - >0表示对应训练次数的模型
+# SAVE_EVERY: 保存频率，每训练多少次保存一次
+# BATCH_SIZE: 每次喂入的数据量
+# LR: 学习率
+EPOCHS = 50
+HISTORICAL_EPOCHS = -1
+SAVE_EVERY = 5
+BATCH_SIZE = 4
+LR = 1e-4
 
-OUTPUT_IMG_PATH = 'output/img'
+# OUTPUT_MODEL_PATH: 输出的模型路径
+# CLASSES: 类别列表
 OUTPUT_MODEL_PATH = 'output/model'
 CLASSES = ['person', 'bird', 'cat', 'cow', 'dog', 'horse', 'sheep',
            'aeroplane', 'bicycle', 'boat', 'bus', 'car', 'motorbike', 'train',
            'bottle', 'chair', 'dining table', 'potted plant', 'sofa', 'tvmonitor']
 
-if not os.path.exists(OUTPUT_IMG_PATH):
-    os.makedirs(OUTPUT_IMG_PATH)
-
+print('============================================')
 if not os.path.exists(OUTPUT_MODEL_PATH):
     os.makedirs(OUTPUT_MODEL_PATH)
 
+# 检测设备
 if torch.cuda.is_available():
     print('CUDA已启用')
     device = torch.device('cuda')
@@ -34,42 +48,35 @@ else:
     print('CUDA不可用，使用CPU')
     device = torch.device('cpu')
 
+# 加载数据集和加载器
+print('加载数据集...')
 train_data = VOCDataset('train')
 test_data = VOCDataset('test')
-
 train_loader = DataLoader(train_data, batch_size=BATCH_SIZE, shuffle=True)
 test_loader = DataLoader(test_data, batch_size=BATCH_SIZE, shuffle=False)
 
-yolo = YoloV1().to(device)
+# 加载模型
+print('加载模型和优化器...')
+yolo, last_epoch = load_model(HISTORICAL_EPOCHS, device)
 criterion = YoloV1Loss(7, 2, 5, 0.5, device)
-# optim = torch.optim.Adam(yolo.parameters(), lr=LR, betas=BETAS)
-optim = torch.optim.SGD(yolo.parameters(), lr=LR, momentum=.9, weight_decay=5e-4)
+optim = torch.optim.SGD(yolo.parameters(), lr=LR,
+                        momentum=.9, weight_decay=5e-4)
 
-    
-if HISTORICAL_EPOCHS > 0:
-    yolo.load_state_dict(torch.load(os.path.join(OUTPUT_MODEL_PATH, f'epoch{HISTORICAL_EPOCHS}.pth')))
-elif HISTORICAL_EPOCHS == -1:
-    epoch_files = os.listdir(OUTPUT_MODEL_PATH)
-    last_epoch = 0
-    for file in epoch_files:
-        if file.startswith('epoch'):
-            epoch = int(file[5:])
-            if epoch > last_epoch:
-                last_epoch = epoch
-	yolo.load_state_dict(torch.load(os.path.join(OUTPUT_MODEL_PATH, f'epoch{last_epoch}.pth')))
-    
+print('开启可视化...')
 viz = visdom.Visdom()
 
+# 开始训练
+print('============================================')
 train_loss, test_loss = [], []
-for epoch in range(1,EPOCHS+1):
-    yolo.train()
+for epoch in range(last_epoch+1, EPOCHS+last_epoch+1):
 
-    pbar = tqdm(enumerate(train_loader), total=len(train_loader), desc=f'第{epoch}次训练')
+    # 训练
+    yolo.train()
+    pbar = tqdm(enumerate(train_loader), total=len(
+        train_loader), desc=f'第{epoch}次训练')
     for index, (data, label) in pbar:
         data = data.to(device)
         label = label.float().to(device)
-        print(data.size())
-        print(label.size())
 
         output = yolo(data)
 
@@ -80,13 +87,15 @@ for epoch in range(1,EPOCHS+1):
         loss.backward()
         optim.step()
 
-        viz.line(train_loss, win='训练Loss', opts={'title':'训练Loss'})
+        viz.line(train_loss, win='训练Loss', opts={'title': '训练Loss'})
 
+    # 测试
     with torch.no_grad():
         yolo.eval()
 
         total_loss = 0
-        pbar = tqdm(enumerate(test_loader), total=len(test_loader), desc=f'第{epoch}次测试')
+        pbar = tqdm(enumerate(test_loader), total=len(
+            test_loader), desc=f'第{epoch}次测试')
         for index, (data, label) in pbar:
             data = data.to(device)
             label = label.to(device)
@@ -97,8 +106,10 @@ for epoch in range(1,EPOCHS+1):
 
         total_loss /= len(test_loader)
         test_loss.append(total_loss)
-        viz.line(total_loss, win='测试Loss', opts={'title':'测试Loss'})
-        output = yolo()
+        viz.line(test_loss, win='测试Loss', opts={'title': '测试Loss'})
+        torch.cuda.empty_cache()
     
+    # 保存模型
     if epoch % SAVE_EVERY == 0:
-        torch.save(yolo.state_dict(), os.path.join(OUTPUT_MODEL_PATH, f'epoch{epoch}.pth'))
+        torch.save(yolo.state_dict(), os.path.join(
+            OUTPUT_MODEL_PATH, f'epoch{epoch}.pth'))

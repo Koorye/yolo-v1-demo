@@ -1,32 +1,13 @@
+#!/usr/bin/env python
+# --*-- encoding: utf-8 --*--
+# @Author: Koorye
+# @Date: 2021-10-27
+# @Desc: 不支持矢量化计算的Yolo V1 loss
+
 import torch
 from torch import nn
-import torch.nn.functional as F
 
-
-def calculate_iou(bbox1, bbox2):
-    """
-    计算bbox1=(x1,y1,x2,y2)和bbox2=(x3,y3,x4,y4)两个bbox的iou
-    """
-
-    intersect_bbox = [0., 0., 0., 0.]  # bbox1和bbox2的交集
-    if bbox1[2] < bbox2[0] or bbox1[0] > bbox2[2] or bbox1[3] < bbox2[1] or bbox1[1] > bbox2[3]:
-        pass
-    else:
-        intersect_bbox[0] = max(bbox1[0], bbox2[0])
-        intersect_bbox[1] = max(bbox1[1], bbox2[1])
-        intersect_bbox[2] = min(bbox1[2], bbox2[2])
-        intersect_bbox[3] = min(bbox1[3], bbox2[3])
-
-    area1 = (bbox1[2] - bbox1[0]) * (bbox1[3] - bbox1[1])  # bbox1面积
-    area2 = (bbox2[2] - bbox2[0]) * (bbox2[3] - bbox2[1])  # bbox2面积
-    area_intersect = (intersect_bbox[2] - intersect_bbox[0]) * \
-        (intersect_bbox[3] - intersect_bbox[1])  # 交集面积
-
-    if area_intersect > 0:
-        return area_intersect / (area1 + area2 - area_intersect)  # 计算iou
-    else:
-        return 0
-
+from util import calculate_iou
 
 class YoloV1Loss(nn.Module):
     """
@@ -38,8 +19,8 @@ class YoloV1Loss(nn.Module):
 
     def forward(self, pred, label):
         """
-        pred: [b,30,7,7]网络输出
-        label: [b,30,7,7]样本标签
+        : param pred: [b,30,7,7] 网络输出
+        : param label: [b,30,7,7] 样本标签
         """
 
         # b_size: 喂入的样本数

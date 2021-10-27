@@ -1,16 +1,23 @@
+#!/usr/bin/env python
+# --*-- encoding: utf-8 --*--
+# @Author: Koorye
+# @Date: 2021-10-27
+# @Desc: VOC 2012数据集
+
 import cv2
 import numpy as np
 import os
 import pandas as pd
-from PIL import Image
-
+import torch
 from torch.utils.data import Dataset, dataset
 from torchvision.transforms import transforms
 
+# DATA_PATH: 数据集的根路径
+# IMG_PATH: 图片的保存路径
+# LABEL_PATH: 标签的保存路径
 DATA_PATH = 'data'
 IMG_PATH = 'data/img'
 LABEL_PATH = 'data/label'
-NUM_BBOX = 2
 
 CLASSES = ['person', 'bird', 'cat', 'cow', 'dog', 'horse', 'sheep',
            'aeroplane', 'bicycle', 'boat', 'bus', 'car', 'motorbike', 'train',
@@ -19,12 +26,13 @@ CLASSES = ['person', 'bird', 'cat', 'cow', 'dog', 'horse', 'sheep',
 
 def convert_bbox2labels(bbox_df):
     """
-    将bbox的(cls,x,y,w,h)数据转换为训练时方便计算Loss的数据形式(7,7,5*B+cls_num)
-    注意，输入的bbox的信息是(xc,yc,w,h)格式的，转换为labels后，bbox的信息转换为了(px,py,w,h)格式
+    将bbox的DataFrame转换为[7,7,30]的格式
+    : param bbox_df: bbox的DataFrame -> [id,x,y,w,h]
+    : return: [7,7,30]
     """
 
     nrow, ncol = 7, 7
-    label = np.zeros((7, 7, 5*NUM_BBOX+len(CLASSES)))
+    label = np.zeros((7, 7, 30))
 
     df = bbox_df.copy()
 
@@ -48,11 +56,6 @@ def convert_bbox2labels(bbox_df):
     return label
 
 
-trans = transforms.Compose([
-    transforms.ToTensor()
-])
-
-
 class VOCDataset(Dataset):
     """
     VOC 2012数据集
@@ -62,6 +65,10 @@ class VOCDataset(Dataset):
         super(VOCDataset, self).__init__()
 
         self.files = []
+        self.trans = transforms.Compose([
+            transforms.ToTensor()
+        ])
+
         if mode == 'train':
             with open(os.path.join(DATA_PATH, 'train.txt'), 'r') as f:
                 self.files = [x.strip() for x in f]
@@ -74,13 +81,15 @@ class VOCDataset(Dataset):
 
     def __getitem__(self, index):
         img = cv2.imread(os.path.join(IMG_PATH, f'{self.files[index]}.jpg'))
+        # 读取CSV文件，转换为[7,7,30]的格式
         df = pd.read_csv(os.path.join(LABEL_PATH, f'{self.files[index]}.csv'))
-
-        return trans(img), trans(convert_bbox2labels(df)).float().transpose(0, 2).transpose(0, 1)
+        return self.trans(img), torch.FloatTensor(convert_bbox2labels(df))
 
 
 if __name__ == '__main__':
+    # 以下代码实现输入核的可视化，以便校验
     dataset = VOCDataset()
+    # index可任意设置
     img, label = dataset.__getitem__(4)
     print(img.size())
     print(label.size())

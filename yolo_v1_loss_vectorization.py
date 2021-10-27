@@ -1,3 +1,9 @@
+#!/usr/bin/env python
+# --*-- encoding: utf-8 --*--
+# @Author: Koorye
+# @Date: 2021-10-27
+# @Desc: 支持矢量化计算的Yolo V1 loss
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -6,10 +12,10 @@ from torch.autograd import Variable
 
 def compute_iou(box1, box2):
     """
-    Compute the intersection over union of two set of boxes, each box is [x1,y1,x2,y2].
-    :param box1: (tensor) bounding boxes, sized [N,4].
-    :param box2: (tensor) bounding boxes, sized [M,4].
-    :return: (tensor) iou, sized [N,M].
+    并行计算多个候选框间的IOU
+    : param box1: 第一组候选框 [N,4]
+    : param box2: 第二组候选框 [M,4]
+    : return: IOU [N,M]，其中第n行第j列的元素表示box1[n]和box2[m]的IOU
     """
 
     N = box1.size(0)
@@ -51,8 +57,8 @@ class YoloV1Loss(nn.Module):
 
     def forward(self, predict, target):
         """
-        :param predict: (tensor) size(batchsize,S,S,Bx5+20=30) [x,y,w,h,c]
-        :param target: (tensor) size(batchsize,S,S,30)
+        :param predict: 预测的输出核 [b,7,7,30]
+        :param target: 标签的输出核 [b,7,7,30]
         :return: loss
         """
 

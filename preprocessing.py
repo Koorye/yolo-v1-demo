@@ -1,25 +1,36 @@
+#!/usr/bin/env python
+# --*-- encoding: utf-8 --*--
+# @Author: Koorye
+# @Date: 2021-10-27
+# @Desc: 数据预处理，制作重设尺寸并填充的图片和标签CSV文件
+
 import cv2
 import numpy as np
 import os
 import pandas as pd
+import shutil
 from tqdm import tqdm
 
+# 类别列表
 CLASSES = ['person', 'bird', 'cat', 'cow', 'dog', 'horse', 'sheep',
            'aeroplane', 'bicycle', 'boat', 'bus', 'car', 'motorbike', 'train',
            'bottle', 'chair', 'dining table', 'potted plant', 'sofa', 'tvmonitor']
 
+# DATA_PATH: 要处理的数据集目录
+# OUTPUT_PATH: 输出的根目录
+# OUTPUT_IMG_PATH: 输出的图片目录
+# OUTPUT_LABEL_PATH: 输出的标签目录
 DATA_PATH = 'data/VOC2012'
+OUTPUT_PATH = 'data'
 OUTPUT_IMG_PATH = 'data/img'
 OUTPUT_LABEL_PATH = 'data/label'
-# DATA_PATH = 'example'
-# OUTPUT_IMG_PATH = 'example'
-# OUTPUT_LABEL_PATH = 'example'
 
 def convert(size, box):
     """
     计算归一化后的x,y,w,h
-    size: (w,h) 宽度和高度信息
-    box:  (x1,y1,x2,y2) 包含左上角坐标(x1,y1)和右下角坐标(x2,y2)
+    : param size: (w,h) 宽度和高度信息
+    : param box:  (x1,y1,x2,y2) 包含左上角坐标(x1,y1)和右下角坐标(x2,y2)
+    : return: x,y,w,h 中心点的相对坐标和宽高
     """
 
     dw = 1. / size[0]
@@ -37,9 +48,10 @@ def convert(size, box):
 
 def convert_annotation(annotation_file):
     """
-    把图像image_id的xml文件转换为目标检测的label文件(csv)
+    将XML注释文件转换为目标检测的CSV标签文件
     其中包含物体的类别，bbox的左上角点坐标以及bbox的宽、高
     并将四个物理量归一化
+    : param annotation_file: XML文件
     """
 
     image_id = annotation_file.split('.')[0]
@@ -67,11 +79,11 @@ def generate_label():
     """
     遍历Annotation目录中的所有{image_id}.xml文件
     生成{image_df}.csv的数据文件，包含以下列
-    name: 物体名称
-    x:    中心横坐标
-    y:    中心纵坐标
-    w:    宽度
-    h:    高度
+    : param name: 物体名称
+    : param x: 中心横坐标
+    : param y: 中心纵坐标
+    : param w: 宽度
+    : param h: 高度
     """
 
     filenames = os.listdir(os.path.join(DATA_PATH, 'Annotations'))
@@ -79,13 +91,15 @@ def generate_label():
     for file in pbar:
         convert_annotation(file)
 
-def padding_resize_img(img_path, img_size):
+def padding_resize_img(img_name, img_size):
     """
-    填充并修改尺寸
+    填充并修改标签尺寸
+    : param img_name: 图片名(包含后缀)
+    : param img_size: 重设后的图片尺寸 img_size x img_size
     """
 
-    img_name = img_path.split('.')[0]
-    img = cv2.imread(os.path.join(DATA_PATH, 'JPEGImages', img_path))
+    img_name_ = img_name.split('.')[0]
+    img = cv2.imread(os.path.join(DATA_PATH, 'JPEGImages', img_name))
     h, w = img.shape[:2]
     padw, padh = 0, 0
     if h > w:
@@ -95,21 +109,21 @@ def padding_resize_img(img_path, img_size):
         padh = (w - h) // 2
         img = np.pad(img,((padh,padh),(0,0),(0,0)), 'constant', constant_values=0)
 
-    df = pd.read_csv(os.path.join(OUTPUT_LABEL_PATH, f'{img_name}.csv'))    
+    df = pd.read_csv(os.path.join(OUTPUT_LABEL_PATH, f'{img_name_}.csv'))    
     if padw != 0:
         df['x'] = (df['x'] * w + padw) / h
         df['w'] = (df['w'] * w) / h
     elif padh != 0:
         df['y'] = (df['y'] * h + padh) / w
         df['h'] = (df['h'] * h) / w
-    df.to_csv(os.path.join(OUTPUT_LABEL_PATH, f'{img_name}.csv'), index=None)
+    df.to_csv(os.path.join(OUTPUT_LABEL_PATH, f'{img_name_}.csv'), index=None)
 
     img = cv2.resize(img, (img_size, img_size))
-    cv2.imwrite(os.path.join(OUTPUT_IMG_PATH, img_path), img, [int(cv2.IMWRITE_PNG_COMPRESSION), 0])
+    cv2.imwrite(os.path.join(OUTPUT_IMG_PATH, img_name), img, [int(cv2.IMWRITE_PNG_COMPRESSION), 0])
 
 def generate_img():
     """
-    修改所有图片并修改标签
+    修改所有图片并修正标签
     """
 
     filenames = os.listdir(os.path.join(DATA_PATH, 'JPEGImages'))
@@ -117,7 +131,16 @@ def generate_img():
     for file in pbar:
         padding_resize_img(file, 448)
 
+def copy_train_and_test():
+    """
+    将train和test文件复制到数据目录下
+    """
+
+    copy_root = os.path.join(DATA_PATH, 'ImageSets', 'Main')
+    shutil.copyfile(os.path.join(copy_root, 'train.txt'), os.path.join(OUTPUT_IMG_PATH, 'train.txt'))
+    shutil.copyfile(os.path.join(copy_root, 'test.txt'), os.path.join(OUTPUT_IMG_PATH, 'test.txt'))
 
 if __name__ == '__main__':
     generate_label()
     generate_img()
+    copy_train_and_test()

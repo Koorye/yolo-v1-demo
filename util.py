@@ -1,12 +1,21 @@
+#!/usr/bin/env python
+# --*-- encoding: utf-8 --*--
+# @Author: Koorye
+# @Date: 2021-10-27
+# @Desc: 工具类，包含模型加载、IOU计算、输出核解码、可视化等功能
+
 import cv2
-import numpy as np
 import os
+import numpy as np
 import pandas as pd
 import torch
+
+from yolo_v1 import YoloV1
 
 
 np.random.seed(1234)
 
+OUTPUT_MODEL_PATH = 'output/model'
 IMG_PATH = 'data/img'
 LABEL_PATH = 'data/label'
 
@@ -14,107 +23,228 @@ CLASSES = ['person', 'bird', 'cat', 'cow', 'dog', 'horse', 'sheep',
            'aeroplane', 'bicycle', 'boat', 'bus', 'car', 'motorbike', 'train',
            'bottle', 'chair', 'dining table', 'potted plant', 'sofa', 'tvmonitor']
 
+# 生成颜色字典
 color_dic = {}
-
 for each in CLASSES:
     r, g, b = np.random.randint(0, 255, 3)
     r, g, b = int(r), int(g), int(b)
-    color_dic[each] = (r,g,b)
+    color_dic[each] = (r, g, b)
 
-def draw_box(img, pos1, pos2, text, color, width):
-    """
-    绘制有标签、颜色的矩形框
-    """
-    text_len = len(text)
-    img = cv2.rectangle(img, pos1, pos2, color, width)
-    img = cv2.rectangle(img, (int(pos1[0]-width/2),pos1[1]-15), (int(pos1[0]+text_len*5+2+width/2),pos1[1]), color, -1)
-    img = cv2.putText(img, text, (pos1[0], pos1[1]-5), cv2.FONT_HERSHEY_SIMPLEX, 0.3, (255, 255, 255))
-    return img
 
-def calculate_iou(bbox1,bbox2):
-    """计算bbox1=(x1,y1,x2,y2)和bbox2=(x3,y3,x4,y4)两个bbox的iou"""
-    intersect_bbox = [0., 0., 0., 0.]  # bbox1和bbox2的交集
-    if bbox1[2]<bbox2[0] or bbox1[0]>bbox2[2] or bbox1[3]<bbox2[1] or bbox1[1]>bbox2[3]:
+def calculate_iou(bbox1, bbox2):
+    """
+    计算bbox1和bbox2两个bbox的iou
+    : param bbox1: 第1个候选框 (x1,y1,x2,y2)
+    : param bbox2: 第2个候选框 (x1,y1,x2,y2)
+    return: IOU
+    """
+
+    intersect_bbox = [0., 0., 0., 0.]
+    if bbox1[2] < bbox2[0] or bbox1[0] > bbox2[2] or bbox1[3] < bbox2[1] or bbox1[1] > bbox2[3]:
         pass
     else:
-        intersect_bbox[0] = max(bbox1[0],bbox2[0])
-        intersect_bbox[1] = max(bbox1[1],bbox2[1])
-        intersect_bbox[2] = min(bbox1[2],bbox2[2])
-        intersect_bbox[3] = min(bbox1[3],bbox2[3])
+        # 计算交集的xmin,ymin,xmax,ymax
+        intersect_bbox[0] = max(bbox1[0], bbox2[0])
+        intersect_bbox[1] = max(bbox1[1], bbox2[1])
+        intersect_bbox[2] = min(bbox1[2], bbox2[2])
+        intersect_bbox[3] = min(bbox1[3], bbox2[3])
 
-    area1 = (bbox1[2] - bbox1[0]) * (bbox1[3] - bbox1[1])  # bbox1面积
-    area2 = (bbox2[2] - bbox2[0]) * (bbox2[3] - bbox2[1])  # bbox2面积
-    area_intersect = (intersect_bbox[2] - intersect_bbox[0]) * (intersect_bbox[3] - intersect_bbox[1])  # 交集面积
-    # print(bbox1,bbox2)
-    # print(intersect_bbox)
-    # input()
+    # 计算第1、2个候选框的面积
+    area1 = (bbox1[2] - bbox1[0]) * (bbox1[3] - bbox1[1])
+    area2 = (bbox2[2] - bbox2[0]) * (bbox2[3] - bbox2[1])
+    # 计算交集的面积
+    area_intersect = (intersect_bbox[2] - intersect_bbox[0]) \
+        * (intersect_bbox[3] - intersect_bbox[1])
 
-    if area_intersect>0:
-        return area_intersect / (area1 + area2 - area_intersect)  # 计算iou
+    # 计算IOU
+    if area_intersect > 0:
+        return area_intersect / (area1 + area2 - area_intersect)
     else:
         return 0
 
+
 def NMS(bbox, conf_thresh=0.1, iou_thresh=0.3):
-    """bbox数据格式是(n,25),前4个是(x1,y1,x2,y2)的坐标信息，第5个是置信度，后20个是类别概率
-    :param conf_thresh: cls-specific confidence score的阈值
-    :param iou_thresh: NMS算法中iou的阈值
     """
-    n = bbox.size()[0]
-    bbox_prob = bbox[:,5:].clone()  # 类别预测的条件概率
-    bbox_confi = bbox[:, 4].clone().unsqueeze(1).expand_as(bbox_prob)  # 预测置信度
-    bbox_cls_spec_conf = bbox_confi*bbox_prob  # 置信度*类别条件概率=cls-specific confidence score整合了是否有物体及是什么物体的两种信息
-    bbox_cls_spec_conf[bbox_cls_spec_conf<=conf_thresh] = 0  # 将低于阈值的bbox忽略
+    NMS非极大值抑制
+    : param bbox: [n,25] -> [x1,y1,x2,y2,conf,p1,p2,...]
+    : param conf_thresh: 置信度阈值，小于该阈值直接排除
+    : param iou_thresh: IOU阈值，大于该阈值则排除置信度小的候选框
+    : return: 抑制后的候选框 [m,6] -> [id,x1,y1,x2,y2,conf]
+    """
+
+    # 得到每个候选框的条件概率 [n,25] -> [n,20]
+    bbox_prob = bbox[:, 5:].clone()
+
+    # 得到每个候选框的置信度并扩展 [n,25] -> [n,] -> [n,1] -> [n,20]
+    bbox_confi = bbox[:, 4].clone().unsqueeze(1).expand_as(bbox_prob)
+
+    # 相乘得到每个候选框预测每个物体的概率 [n,20] * [n,20] -> [n,20]
+    bbox_cls_spec_conf = bbox_confi*bbox_prob
+
+    # 排除低于阈值的候选框 [n,20]
+    bbox_cls_spec_conf[bbox_cls_spec_conf <= conf_thresh] = 0
+
+    # 遍历每一种物体
     for c in range(20):
-        rank = torch.sort(bbox_cls_spec_conf[:,c],descending=True).indices
+        # 对所有候选框进行排序，排序依据为该类物体的概率，倒序排序并取索引 [20] -> [r1,r2,...,r20]分别表示第i个候选框的排名
+        rank = torch.sort(bbox_cls_spec_conf[:, c], descending=True).indices
+        # 遍历每个候选框
         for i in range(98):
-            if bbox_cls_spec_conf[rank[i],c]!=0:
-                for j in range(i+1,98):
-                    if bbox_cls_spec_conf[rank[j],c]!=0:
-                        iou = calculate_iou(bbox[rank[i],0:4],bbox[rank[j],0:4])
+            # 如果第i个候选框的预测概率不为0
+            if bbox_cls_spec_conf[rank[i], c] != 0:
+                # 遍历小于该候选框排名的所有候选框
+                for j in range(i+1, 98):
+                    # 如果预测概率不为0
+                    if bbox_cls_spec_conf[rank[j], c] != 0:
+                        # 如果IOU大于阈值，将后者预测概率置0
+                        iou = calculate_iou(
+                            bbox[rank[i], 0:4], bbox[rank[j], 0:4])
                         if iou > iou_thresh:  # 根据iou进行非极大值抑制抑制
-                            bbox_cls_spec_conf[rank[j],c] = 0
-    bbox = bbox[torch.max(bbox_cls_spec_conf,dim=1).values>0]  # 将20个类别中最大的cls-specific confidence score为0的bbox都排除
-    bbox_cls_spec_conf = bbox_cls_spec_conf[torch.max(bbox_cls_spec_conf,dim=1).values>0]
-    res = torch.ones((bbox.size()[0],6))
-    res[:,1:5] = bbox[:,0:4]  # 储存最后的bbox坐标信息
-    res[:,0] = torch.argmax(bbox[:,5:],dim=1).int()  # 储存bbox对应的类别信息
-    res[:,5] = torch.max(bbox_cls_spec_conf,dim=1).values  # 储存bbox对应的class-specific confidence scores
+                            bbox_cls_spec_conf[rank[j], c] = 0
+
+    # 筛选最大预测概率大于0(NMS抑制后有概率即表明有探测到物体)的候选框 [n,25] -> [m,25]
+    # m为筛选后的候选框数量，即每一行是一个候选框
+    bbox = bbox[torch.max(bbox_cls_spec_conf, dim=1).values > 0]
+
+    # 筛选最大预测概率大于0的候选框 [n,25] -> [m,25]
+    bbox_cls_spec_conf = bbox_cls_spec_conf[torch.max(
+        bbox_cls_spec_conf, dim=1).values > 0]
+
+    # 创建尺寸为[m,6]的矩阵用于存储筛选后的候选框
+    res = torch.ones((bbox.size(0), 6))
+
+    # 存储x1,y1,x2,y2
+    res[:, 1:5] = bbox[:, 0:4]
+    # 存储类别所属的id
+    res[:, 0] = torch.argmax(bbox[:, 5:], dim=1).int()
+    # 存储概率的最大值
+    res[:, 5] = torch.max(bbox_cls_spec_conf, dim=1).values
     return res
+
 
 def labels2bbox(matrix, use_nms=True):
     """
-    将网络输出的7*7*30的数据转换为bbox的(98,25)的格式，然后再将NMS处理后的结果返回
-    :param matrix: 注意，输入的数据中，bbox坐标的格式是(px,py,w,h)，需要转换为(x1,y1,x2,y2)的格式再输入NMS
-    :return: 返回NMS处理后的结果
+    将[7,7,30]的输出核转换为[m,6]的候选框
+    : param matrix: 输出核 [7,7,30]
+    : param use_nms: 是否使用NMS，不使用将保留所有候选框
+    : return: 候选框 [m,6] -> [id,x1,y1,x2,y2,conf]，其中m表示候选框的数量
     """
-    if matrix.size()[0:2]!=(7,7):
-        raise ValueError("Error: Wrong labels size:",matrix.size())
-    bbox = torch.zeros((98,25))
-    # 先把7*7*30的数据转变为bbox的(98,25)的格式，其中，bbox信息格式从(px,py,w,h)转换为(x1,y1,x2,y2),方便计算iou
-    for i in range(7):  # i是网格的行方向(y方向)
-        for j in range(7):  # j是网格的列方向(x方向)
-            bbox[2*(i*7+j),0:4] = torch.Tensor([(matrix[i, j, 0] + j) / 7 - matrix[i, j, 2] / 2,
-                                                (matrix[i, j, 1] + i) / 7 - matrix[i, j, 3] / 2,
-                                                (matrix[i, j, 0] + j) / 7 + matrix[i, j, 2] / 2,
-                                                (matrix[i, j, 1] + i) / 7 + matrix[i, j, 3] / 2])
-            bbox[2 * (i * 7 + j), 4] = matrix[i,j,4]
-            bbox[2*(i*7+j),5:] = matrix[i,j,10:]
-            bbox[2*(i*7+j)+1,0:4] = torch.Tensor([(matrix[i, j, 5] + j) / 7 - matrix[i, j, 7] / 2,
-                                                (matrix[i, j, 6] + i) / 7 - matrix[i, j, 8] / 2,
-                                                (matrix[i, j, 5] + j) / 7 + matrix[i, j, 7] / 2,
-                                                (matrix[i, j, 6] + i) / 7 + matrix[i, j, 8] / 2])
-            bbox[2 * (i * 7 + j)+1, 4] = matrix[i, j, 9]
-            bbox[2*(i*7+j)+1,5:] = matrix[i,j,10:]
+
+    # 创建尺寸为[98,25]的矩阵用于存储候选框 -> [x1,y1,x2,y2,conf,p1,p2,...]
+    bbox = torch.zeros((98, 25))
+    for row in range(7):
+        for col in range(7):
+            # 将第i行第j列网格的坐标信息x,y(相对值),w,h
+            # 转换为x1,y1,x2,y2
+            # (x+col)/ncol - w/2 -> x1
+            # (y+row)/nrow - h/2 -> y1
+            # (x+col)/ncol + w/2 -> x2
+            # (y+row)/nrow + h/2 -> y2
+            # 存储到bbox对应位置
+            bbox[2*(row*7+col), :4] = torch.Tensor([(matrix[row, col, 0]+col) / 7
+                                                - matrix[row, col, 2] / 2,
+                                                (matrix[row, col, 1]+row) / 7
+                                                 - matrix[row, col, 3] / 2,
+                                                (matrix[row, col, 0]+col) / 7
+                                                 + matrix[row, col, 2] / 2,
+                                                 (matrix[row, col, 1]+row) / 7
+                                                 + matrix[row, col, 3] / 2])
+
+            # 存储置信度
+            bbox[2*(row*7+col), 4] = matrix[row, col, 4]
+            # 存储条件概率
+            bbox[2*(row*7+col), 5:] = matrix[row, col, 10:]
+
+            # 同理，存储第2个候选框到对应位置
+            bbox[2*(row*7+col)+1, :4] = torch.Tensor([(matrix[row, col, 5]+col) / 7
+                                                  - matrix[row, col, 7] / 2,
+                                                   (matrix[row, col, 6]+row) / 7
+                                                   - matrix[row, col, 8] / 2,
+                                                   (matrix[row, col, 5]+col) / 7
+                                                   + matrix[row, col, 7] / 2,
+                                                   (matrix[row, col, 6]+row) / 7
+                                                   + matrix[row, col, 8] / 2])
+            # 存储置信度
+            bbox[2*(row*7+col)+1, 4] = matrix[row, col, 9]
+            # 存储条件概率
+            bbox[2*(row*7+col)+1, 5:] = matrix[row, col, 10:]
     if use_nms:
-        return NMS(bbox)  # 对所有98个bbox执行NMS算法，清理cls-specific confidence score较低以及iou重合度过高的bbox
-    
+        # NMS抑制 [98,25] -> [m,6]
+        return NMS(bbox)
+
+    # 不经过NMS，直接筛选结果
     res = torch.zeros(98, 6)
-    res[:,0] = torch.argmax(bbox[:,5:],dim=1).int()  # 储存bbox对应的类别信息
-    res[:,1:6] = bbox[:, :5]
+    # 获取预测概率最大的类别的id并存储
+    res[:, 0] = torch.argmax(bbox[:, 5:], dim=1).int()
+    # 获取每个类别的坐标和置信度x1,y1,x2,y2,conf并存储
+    res[:, 1:6] = bbox[:, :5]
     return res
 
 
-def show(img, bbox):
+def load_model(historical_epoch, device):
+    """
+    加载模型
+    : param historical_epoch: 历史训练次数，0表示不加载历史模型，>0表示对应训练次数的模型，-1表示最近一次训练的模型
+    : param device: 设备
+    : return: yolo, last_epoch 加载的模型和对应的训练次数
+    """
+
+    yolo = YoloV1().to(device)
+    if historical_epoch == 0:
+        last_epoch = 0
+        return yolo, last_epoch
+
+    if historical_epoch > 0:
+        yolo.load_state_dict(torch.load(os.path.join(
+            OUTPUT_MODEL_PATH, f'epoch{historical_epoch}.pth')))
+        last_epoch = historical_epoch
+    elif historical_epoch == -1:
+        epoch_files = os.listdir(OUTPUT_MODEL_PATH)
+        last_epoch = 0
+        for file in epoch_files:
+            file = file.split('.')[0]
+            if file.startswith('epoch'):
+                epoch = int(file[5:])
+                if epoch > last_epoch:
+                    last_epoch = epoch
+
+    yolo.load_state_dict(torch.load(os.path.join(
+        OUTPUT_MODEL_PATH, f'epoch{last_epoch}.pth')))
+    return yolo, last_epoch
+
+
+def draw_box(img, pos1, pos2, text, conf, color, width):
+    """
+    绘制有标签、颜色的矩形框
+    : param img: 要绘制的图片
+    : param pos1: 左上角坐标 (x1,y1)
+    : param pos2: 右下角坐标 (x2,y2)
+    : param text: 注释文字
+    : param conf: 概率
+    : param color: 颜色
+    : param width: 宽度
+    : return: img 绘制后的图片
+    """
+
+    text_len = len(text)
+    img = cv2.rectangle(img, pos1, pos2, color, width)
+    img = cv2.rectangle(img, (int(
+        pos1[0]-width/2), pos1[1]-15), (int(pos1[0]+text_len*5.5+24), pos1[1]), color, -1)
+    img = cv2.putText(
+        img, text, (pos1[0], pos1[1]-5), cv2.FONT_HERSHEY_SIMPLEX, 0.3, (255, 255, 255))
+    img = cv2.putText(img, '{:.2f}'.format(conf), (int(
+        pos1[0]+text_len*5.5), pos1[1]-5), cv2.FONT_HERSHEY_SIMPLEX, 0.3, (255, 255, 255))
+    return img
+
+
+def draw_bbox(img, bbox):
+    """
+    生成图片和bbox
+    : param img: 要绘制的图片 [448, 448, 3]
+    : param bbox: 候选框 [n, 6] -> [id,x1,y1,x2,y2,p]
+    : return: img 绘制后的图片
+    """
+
     height, width = img.shape[:2]
     bbox_df = pd.DataFrame(bbox, columns=['id', 'x1', 'y1', 'x2', 'y2', 'p'])
 
@@ -123,21 +253,6 @@ def show(img, bbox):
         x1, y1 = int(row['x1'] * width), int(row['y1'] * height)
         x2, y2 = int(row['x2'] * width), int(row['y2'] * height)
         p = int(row['p'])
-        img = draw_box(img, (x1,y1), (x2,y2), name, color_dic[name], p*5)
-    cv2.imshow('img', img)
-    cv2.waitKey(0)
-
-if __name__ == '__main__':
-    from dataset import VOCDataset
-    from yolo_v1 import YoloV1
-
-    data, target = VOCDataset().__getitem__(0)
-    yolo = YoloV1()
-    output = yolo(data.unsqueeze(0))
-
-    img = np.uint8(data.transpose(0,1).transpose(1,2).cpu().numpy() * 255)
-    # bbox = labels2bbox(output.squeeze(0), use_nms=False)
-    # bbox = labels2bbox(target, use_nms=False)
-    bbox = labels2bbox(output.squeeze(0))
-
-    show(img, bbox)
+        img = draw_box(img, (x1, y1), (x2, y2), name,
+                       float(row['p']), color_dic[name], p*5)
+    return img
