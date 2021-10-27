@@ -6,7 +6,7 @@ import visdom
 
 from dataset import VOCDataset
 from yolo_v1 import YoloV1
-from yolo_v1_loss_v3 import YoloV1Loss
+from yolo_v1_loss_vectorization import YoloV1Loss
 
 EPOCHS = 100
 HISTORICAL_EPOCHS = 0
