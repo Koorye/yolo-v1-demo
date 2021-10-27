@@ -11,8 +11,9 @@ from tqdm import tqdm
 import visdom
 
 from dataset import VOCDataset
-from util import load_model
+from show_yolo import draw_img_with_bbox
 from yolo_v1_loss_vectorization import YoloV1Loss
+from util import load_model
 
 # 初始化参数
 # EPOCHS: 总的训练次数
@@ -107,7 +108,13 @@ for epoch in range(last_epoch+1, EPOCHS+last_epoch+1):
         total_loss /= len(test_loader)
         test_loss.append(total_loss)
         viz.line(test_loss, win='测试Loss', opts={'title': '测试Loss'})
+
         torch.cuda.empty_cache()
+
+    # 可视化预测效果
+    pred_imgs, target_imgs = draw_img_with_bbox(yolo, 16, save=True)
+    viz.images(pred_imgs, win='预测图片', opts={'title':'预测图片'})
+    viz.images(target_imgs, win='实际图片', opts={'title':'实际图片'})
     
     # 保存模型
     if epoch % SAVE_EVERY == 0:
