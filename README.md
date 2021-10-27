@@ -104,3 +104,16 @@ python main.py
 ```shell
 python show_yolo.py
 ```
+
+## 介绍
+
+### 目录结构
+
+- `dataset.py`：数据集
+- `main.py`： 主程序
+- `preprocessing.py`：预处理
+- `show_yolo.py`：训练结果展示
+- `util.py`：工具类
+- `yolo_v1_loss_vectorization.py`：矢量化的Yolo V1 loss计算
+- `yolo_v1_loss.py`：非矢量化的loss计算
+- `yolo_v1.py`：Yolo V1主模型，采用ResNet34代替支撑结构
