@@ -7,6 +7,7 @@
 import os
 import torch
 from torch.utils.data import DataLoader
+from torch.optim.lr_scheduler import LambdaLR
 from tqdm import tqdm
 import visdom
 
@@ -24,11 +25,11 @@ from util import load_model
 # SAVE_EVERY: 保存频率，每训练多少次保存一次
 # BATCH_SIZE: 每次喂入的数据量
 # LR: 学习率
-EPOCHS = 50
-HISTORICAL_EPOCHS = -1
+EPOCHS = 200
+HISTORICAL_EPOCHS = 0
 SAVE_EVERY = 5
-BATCH_SIZE = 2
-LR = 1e-4
+BATCH_SIZE = 1
+LR = 1e-3
 
 # OUTPUT_MODEL_PATH: 输出的模型路径
 # CLASSES: 类别列表
@@ -63,6 +64,26 @@ criterion = YoloV1Loss(7, 2, 5, 0.5, device)
 optim = torch.optim.SGD(yolo.parameters(), lr=LR,
                         momentum=.9, weight_decay=5e-4)
 
+# 加载调度器
+def lr_lambda(ep):
+    current_epoch = ep + HISTORICAL_EPOCHS
+    print(current_epoch)
+    # 前10次训练学习率由1e-3线性上升到1e-2
+    if current_epoch < 10:
+        return current_epoch + 1.
+
+    # 之后学习率阶梯下降 1e-2 -> 1e-3 -> 1e-4 -> 1e-5
+    elif current_epoch >= 10:
+        return 10.
+    elif current_epoch >= 85:
+        return 1.
+    elif current_epoch >= 115:
+        return .1
+    elif current_epoch >= 145:
+        return .01
+
+yolo_lr = LambdaLR(optim, lr_lambda=lr_lambda)
+
 print('开启可视化...')
 viz = visdom.Visdom()
 
@@ -89,6 +110,9 @@ for epoch in range(last_epoch+1, EPOCHS+last_epoch+1):
         optim.step()
 
         viz.line(train_loss, win='训练Loss', opts={'title': '训练Loss'})
+
+    yolo_lr.step()
+    print(yolo_lr.get_last_lr())
 
     # 测试
     with torch.no_grad():

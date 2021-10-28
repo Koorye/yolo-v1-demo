@@ -24,7 +24,6 @@ HISTORICAL_EPOCHS = -1
 
 # 加载模型
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-yolo, _ = load_model(HISTORICAL_EPOCHS, device)
 
 trans = transforms.Compose([
     transforms.ToTensor(),
@@ -84,6 +83,7 @@ def draw_img_with_bbox(yolo, show_range, start_index=0, save=False):
 
 if __name__ == '__main__':
     viz = visdom.Visdom()
+    yolo, _ = load_model(HISTORICAL_EPOCHS, device)
     pred_imgs, target_imgs = draw_img_with_bbox(yolo, 16, save=True)
 
     viz.images(pred_imgs, win='预测图片', opts={'title': '预测图片'})
