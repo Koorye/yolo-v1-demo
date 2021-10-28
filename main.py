@@ -4,6 +4,7 @@
 # @Date: 2021-10-27
 # @Desc: Yolo V1的训练、测试、可视化和保存
 
+import numpy as np
 import os
 import torch
 from torch.utils.data import DataLoader
@@ -26,10 +27,10 @@ from util import load_model
 # BATCH_SIZE: 每次喂入的数据量
 # LR: 学习率
 EPOCHS = 200
-HISTORICAL_EPOCHS = 0
-SAVE_EVERY = 5
-BATCH_SIZE = 4
-LR = 1e-4
+HISTORICAL_EPOCHS = -1
+SAVE_EVERY = 1
+BATCH_SIZE = 7
+LR = 1e-3
 
 # OUTPUT_MODEL_PATH: 输出的模型路径
 # CLASSES: 类别列表
@@ -66,22 +67,22 @@ optim = torch.optim.SGD(yolo.parameters(), lr=LR,
 
 # 加载调度器
 def lr_lambda(ep):
-    current_epoch = ep + HISTORICAL_EPOCHS
-
-    # 前3次训练学习率由1e-3线性上升到1e-3
+    current_epoch = ep + last_epoch
+    # 预热期学习率由 1e-4 -> 1e-3
     if current_epoch == 0:
-        return 1.
-    elif current_epoch == 1:
-        return 5.
-    elif current_epoch == 2:
-        return 7.5
-    elif current_epoch >= 3:
-        return 10.
-    # 之后学习率阶梯下降 1e-3 -> 1e-4 -> 1e-5
-    elif current_epoch >= 30:
-        return 1.
-    elif current_epoch >= 40:
         return .1
+    elif current_epoch == 1:
+        return .5
+    elif current_epoch == 2:
+        return .75
+    # 之后学习率阶梯下降 1e-3 -> 1e-4 -> 1e-5
+    elif current_epoch < 30:
+        return 1.
+    elif current_epoch < 40:
+        return .1
+    else:
+        return .01
+    
 
 yolo_lr = LambdaLR(optim, lr_lambda=lr_lambda)
 
@@ -104,6 +105,9 @@ for epoch in range(last_epoch+1, EPOCHS+last_epoch+1):
         output = yolo(data)
 
         loss = criterion(output, label)
+        if np.isnan(loss.item()):
+            print('梯度爆炸！')
+            exit(-1)
         train_loss.append(loss.item())
         if len(train_loss) > 1000:
             train_loss.pop(0)
@@ -132,13 +136,12 @@ for epoch in range(last_epoch+1, EPOCHS+last_epoch+1):
 
         total_loss /= len(test_loader)
         test_loss.append(total_loss)
-        print(test_loss)
         viz.line(test_loss, list(range(len(test_loss))), win='测试Loss', opts={'title': '测试Loss'})
 
         torch.cuda.empty_cache()
 
         # 可视化预测效果
-        pred_imgs, target_imgs = draw_img_with_bbox(yolo, 8, save=True)
+        pred_imgs, target_imgs = draw_img_with_bbox(yolo, 8, f'epoch{epoch}', save=True)
         viz.images(pred_imgs, win='预测图片', opts={'title':'预测图片'})
         viz.images(target_imgs, win='实际图片', opts={'title':'实际图片'})
     

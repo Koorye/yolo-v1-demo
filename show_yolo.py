@@ -32,11 +32,12 @@ trans = transforms.Compose([
 test_data = VOCDataset('test')
 
 
-def draw_img_with_bbox(yolo, show_range, start_index=0, save=False):
+def draw_img_with_bbox(yolo, show_range, save_path, start_index=0, save=False):
     """
     绘制候选框的图片，用于查看可视化结果
     : param show_range: 展示范围，即展示的图片数量
     : param start_index: 要展示图片在数据集中的开始下标
+    : param save_path: 图片的保存路径
     : param save: 是否保存
     : return: 返回 [b,w,h,c], [b,w,h,c] 预测和实际图片的张量
     """
@@ -63,9 +64,10 @@ def draw_img_with_bbox(yolo, show_range, start_index=0, save=False):
             target_img = draw_bbox(img2, target_bbox)
 
             if save:
-                cv2.imwrite(os.path.join(OUTPUT_IMG_PATH,
+                os.makedirs(os.path.join(OUTPUT_IMG_PATH, save_path))
+                cv2.imwrite(os.path.join(OUTPUT_IMG_PATH, save_path,
                             f'pred{i}.jpg'), output_img)
-                cv2.imwrite(os.path.join(OUTPUT_IMG_PATH,
+                cv2.imwrite(os.path.join(OUTPUT_IMG_PATH, save_path,
                             f'target{i}.jpg'), target_img)
 
             b1, g1, r1 = cv2.split(output_img)
