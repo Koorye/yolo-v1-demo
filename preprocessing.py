@@ -62,7 +62,7 @@ def convert_annotation(annotation_file):
     size = (size_df['width'].tolist()[0], size_df['height'].tolist()[0])
 
     name_df = pd.read_xml(annotation_file, xpath='.//object')[['name']]
-    pos_df = pd.read_xml(annotation_file, xpath='.//bndbox')
+    pos_df = pd.read_xml(annotation_file, xpath='.//object/bndbox')
     df = pd.concat([name_df, pos_df], axis=1)[['name', 'xmin', 'ymin', 'xmax', 'ymax']]
 
     df['new'] = df.apply(lambda row: convert(size, row.tolist()[1:]), axis=1)
@@ -138,7 +138,7 @@ def copy_train_and_test():
 
     copy_root = os.path.join(DATA_PATH, 'ImageSets', 'Main')
     shutil.copyfile(os.path.join(copy_root, 'train.txt'), os.path.join(OUTPUT_IMG_PATH, 'train.txt'))
-    shutil.copyfile(os.path.join(copy_root, 'test.txt'), os.path.join(OUTPUT_IMG_PATH, 'test.txt'))
+    shutil.copyfile(os.path.join(copy_root, 'val.txt'), os.path.join(OUTPUT_IMG_PATH, 'val.txt'))
 
 if __name__ == '__main__':
     generate_label()

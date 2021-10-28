@@ -48,6 +48,9 @@ def draw_img_with_bbox(yolo, show_range, save_path, start_index=0, save=False):
                     start_index), total=show_range)
 
         pred_imgs, target_imgs = [], []
+        if save:
+            os.makedirs(os.path.join(OUTPUT_IMG_PATH, save_path))
+            
         for i in pbar:
             data, target = test_data.__getitem__(i)
             data = data.to(device)
@@ -64,7 +67,6 @@ def draw_img_with_bbox(yolo, show_range, save_path, start_index=0, save=False):
             target_img = draw_bbox(img2, target_bbox)
 
             if save:
-                os.makedirs(os.path.join(OUTPUT_IMG_PATH, save_path))
                 cv2.imwrite(os.path.join(OUTPUT_IMG_PATH, save_path,
                             f'pred{i}.jpg'), output_img)
                 cv2.imwrite(os.path.join(OUTPUT_IMG_PATH, save_path,

@@ -46,7 +46,15 @@ def convert_bbox2labels(bbox_df):
     df['px'] = df['x'] * ncol - df['col']
     df['py'] = df['y'] * nrow - df['row']
 
+    # 排除多个物体在同一网格的情况
+    historical_pos = []
     for _, row in df.iterrows():
+        pos = (int(row['row']), int(row['col']))
+        if pos not in historical_pos:
+            historical_pos.append(pos)
+        else:
+            continue
+
         label[int(row['row']), int(row['col']), 0:5] = np.array(
             [row['px'], row['py'], row['w'], row['h'], 1])
         label[int(row['row']), int(row['col']), 5:10] = np.array(
@@ -88,9 +96,9 @@ class VOCDataset(Dataset):
 
 if __name__ == '__main__':
     # 以下代码实现输入核的可视化，以便校验
-    dataset = VOCDataset()
+    dataset = VOCDataset(mode='test')
     # index可任意设置
-    img, label = dataset.__getitem__(4)
+    img, label = dataset.__getitem__(6)
     print(img.size())
     print(label.size())
 
