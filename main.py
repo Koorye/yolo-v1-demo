@@ -29,7 +29,7 @@ EPOCHS = 200
 HISTORICAL_EPOCHS = 0
 SAVE_EVERY = 5
 BATCH_SIZE = 4
-LR = 1e-3
+LR = 1e-4
 
 # OUTPUT_MODEL_PATH: 输出的模型路径
 # CLASSES: 类别列表
@@ -67,20 +67,21 @@ optim = torch.optim.SGD(yolo.parameters(), lr=LR,
 # 加载调度器
 def lr_lambda(ep):
     current_epoch = ep + HISTORICAL_EPOCHS
-    print(current_epoch)
-    # 前10次训练学习率由1e-3线性上升到1e-2
-    if current_epoch < 10:
-        return current_epoch + 1.
 
-    # 之后学习率阶梯下降 1e-2 -> 1e-3 -> 1e-4 -> 1e-5
-    elif current_epoch >= 10:
-        return 10.
-    elif current_epoch >= 85:
+    # 前3次训练学习率由1e-3线性上升到1e-3
+    if current_epoch == 0:
         return 1.
-    elif current_epoch >= 115:
+    elif current_epoch == 1:
+        return 5.
+    elif current_epoch == 2:
+        return 7.5
+    elif current_epoch >= 3:
+        return 10.
+    # 之后学习率阶梯下降 1e-3 -> 1e-4 -> 1e-5
+    elif current_epoch >= 30:
+        return 1.
+    elif current_epoch >= 40:
         return .1
-    elif current_epoch >= 145:
-        return .01
 
 yolo_lr = LambdaLR(optim, lr_lambda=lr_lambda)
 
@@ -104,12 +105,13 @@ for epoch in range(last_epoch+1, EPOCHS+last_epoch+1):
 
         loss = criterion(output, label)
         train_loss.append(loss.item())
-
+        if len(train_loss) > 1000:
+            train_loss.pop(0)
         optim.zero_grad()
         loss.backward()
         optim.step()
 
-        viz.line(train_loss, range(len(train_loss)), win='训练Loss', opts={'title': '训练Loss'})
+        viz.line(train_loss, list(range(len(train_loss))), win='训练Loss', opts={'title': '训练Loss'})
 
     yolo_lr.step()
 
@@ -130,14 +132,15 @@ for epoch in range(last_epoch+1, EPOCHS+last_epoch+1):
 
         total_loss /= len(test_loader)
         test_loss.append(total_loss)
-        viz.line(test_loss, range(len(test_loss)), win='测试Loss', opts={'title': '测试Loss'})
+        print(test_loss)
+        viz.line(test_loss, list(range(len(test_loss))), win='测试Loss', opts={'title': '测试Loss'})
 
         torch.cuda.empty_cache()
 
-    # 可视化预测效果
-    pred_imgs, target_imgs = draw_img_with_bbox(yolo, 16, save=True)
-    viz.images(pred_imgs, win='预测图片', opts={'title':'预测图片'})
-    viz.images(target_imgs, win='实际图片', opts={'title':'实际图片'})
+        # 可视化预测效果
+        pred_imgs, target_imgs = draw_img_with_bbox(yolo, 8, save=True)
+        viz.images(pred_imgs, win='预测图片', opts={'title':'预测图片'})
+        viz.images(target_imgs, win='实际图片', opts={'title':'实际图片'})
     
     # 保存模型
     if epoch % SAVE_EVERY == 0:
