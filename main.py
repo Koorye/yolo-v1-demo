@@ -28,7 +28,7 @@ from util import load_model
 EPOCHS = 200
 HISTORICAL_EPOCHS = 0
 SAVE_EVERY = 5
-BATCH_SIZE = 1
+BATCH_SIZE = 4
 LR = 1e-3
 
 # OUTPUT_MODEL_PATH: 输出的模型路径
@@ -109,10 +109,9 @@ for epoch in range(last_epoch+1, EPOCHS+last_epoch+1):
         loss.backward()
         optim.step()
 
-        viz.line(train_loss, win='训练Loss', opts={'title': '训练Loss'})
+        viz.line(train_loss, range(len(train_loss)), win='训练Loss', opts={'title': '训练Loss'})
 
     yolo_lr.step()
-    print(yolo_lr.get_last_lr())
 
     # 测试
     with torch.no_grad():
@@ -131,7 +130,7 @@ for epoch in range(last_epoch+1, EPOCHS+last_epoch+1):
 
         total_loss /= len(test_loader)
         test_loss.append(total_loss)
-        viz.line(test_loss, win='测试Loss', opts={'title': '测试Loss'})
+        viz.line(test_loss, range(len(test_loss)), win='测试Loss', opts={'title': '测试Loss'})
 
         torch.cuda.empty_cache()
 
