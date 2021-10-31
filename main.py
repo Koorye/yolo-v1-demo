@@ -93,7 +93,6 @@ viz = visdom.Visdom()
 
 # 开始训练
 print('============================================')
-train_loss, test_loss = [], []
 precisions, recalls = [], []
 avg_train_loss, train_loss, test_loss = [], [], []
 total_train_loss = 0.
@@ -125,9 +124,6 @@ for epoch in range(last_epoch+1, EPOCHS+last_epoch+1):
         loss.backward()
         optim.step()
 
-        viz.line(Y=train_loss,
-                 X=list(range(len(train_loss))),
-                 win='训练Loss', opts={'title': '训练Loss'})
         viz.line(Y=train_loss,
                  X=list(range(len(train_loss))),
                  win='当前Loss',
