@@ -66,6 +66,8 @@ optim = torch.optim.SGD(yolo.parameters(), lr=LR,
                         momentum=.9, weight_decay=5e-4)
 
 # 加载调度器
+
+
 def lr_lambda(ep):
     current_epoch = ep + last_epoch
     # 预热期学习率由 1e-4 -> 1e-3
@@ -82,7 +84,7 @@ def lr_lambda(ep):
         return .1
     else:
         return .01
-    
+
 
 yolo_lr = LambdaLR(optim, lr_lambda=lr_lambda)
 
@@ -116,7 +118,8 @@ for epoch in range(last_epoch+1, EPOCHS+last_epoch+1):
         loss.backward()
         optim.step()
 
-        viz.line(train_loss, list(range(len(train_loss))), win='训练Loss', opts={'title': '训练Loss'})
+        viz.line(train_loss, list(range(len(train_loss))),
+                 win='训练Loss', opts={'title': '训练Loss'})
 
     yolo_lr.step()
 
@@ -135,7 +138,7 @@ for epoch in range(last_epoch+1, EPOCHS+last_epoch+1):
             output = yolo(data)
             loss = criterion(output, label)
             total_loss += loss.item()
-            tp_,m_,n_ = calculate_acc_from_batch(output, label)
+            tp_, m_, n_ = calculate_acc_from_batch(output, label)
             tp += tp_
             m += m_
             n += n_
@@ -146,17 +149,21 @@ for epoch in range(last_epoch+1, EPOCHS+last_epoch+1):
         recall = tp / n
         precisions.append(precision)
         recalls.append(recall)
-        viz.line(test_loss, list(range(len(test_loss))), win='测试Loss', opts={'title': '测试Loss'})
-        viz.line(precisions, list(range(len(precisions))), win='准确率', opts={'title': '准确率'})
-        viz.line(recalls, list(range(len(recalls))), win='召回率', opts={'title': '召回率'})
+        viz.line(test_loss, list(range(len(test_loss))),
+                 win='测试Loss', opts={'title': '测试Loss'})
+        viz.line(precisions, list(range(len(precisions))),
+                 win='准确率', opts={'title': '准确率'})
+        viz.line(recalls, list(range(len(recalls))),
+                 win='召回率', opts={'title': '召回率'})
 
         torch.cuda.empty_cache()
 
         # 可视化预测效果
-        pred_imgs, target_imgs = draw_img_with_bbox(yolo, 8, f'epoch{epoch}', save=True)
-        viz.images(pred_imgs, win='预测图片', opts={'title':'预测图片'})
-        viz.images(target_imgs, win='实际图片', opts={'title':'实际图片'})
-    
+        pred_imgs, target_imgs = draw_img_with_bbox(
+            yolo, 8, f'epoch{epoch}', save=True)
+        viz.images(pred_imgs, win='预测图片', opts={'title': '预测图片'})
+        viz.images(target_imgs, win='实际图片', opts={'title': '实际图片'})
+
     # 保存模型
     if epoch % SAVE_EVERY == 0:
         torch.save(yolo.state_dict(), os.path.join(

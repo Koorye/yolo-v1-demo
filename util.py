@@ -331,6 +331,7 @@ def calculate_acc_from_batch(output, target, p=.1, iou_shresh=.5):
 
 if __name__ == '__main__':
     from dataset import VOCDataset
+    import datetime
     from torch.utils.data.dataloader import DataLoader
 
     dataset = VOCDataset('train')
@@ -341,4 +342,12 @@ if __name__ == '__main__':
     yolo, _ = load_model(0, device)
     output = yolo(data)
 
-    print(calculate_acc_from_batch(output, target, iou_shresh=.05))
+    start_time = datetime.datetime.now()
+    print(calculate_acc_from_batch(output, target))
+    end_time = datetime.datetime.now()
+    print(end_time-start_time)
+
+    start_time = datetime.datetime.now()
+    print(calculate_acc_from_batch(target, target, iou_shresh=.5))
+    end_time = datetime.datetime.now()
+    print(end_time-start_time)
