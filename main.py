@@ -15,7 +15,7 @@ import visdom
 from dataset import VOCDataset
 from show_yolo import draw_img_with_bbox
 from yolo_v1_loss_vectorization import YoloV1Loss
-from util import load_model
+from util import calculate_acc, calculate_acc_from_batch, load_model
 
 # 初始化参数
 # EPOCHS: 总的训练次数
@@ -92,6 +92,7 @@ viz = visdom.Visdom()
 # 开始训练
 print('============================================')
 train_loss, test_loss = [], []
+precisions, recalls = [], []
 for epoch in range(last_epoch+1, EPOCHS+last_epoch+1):
 
     # 训练
@@ -124,6 +125,7 @@ for epoch in range(last_epoch+1, EPOCHS+last_epoch+1):
         yolo.eval()
 
         total_loss = 0
+        tp, m, n = 0, 0, 0
         pbar = tqdm(enumerate(test_loader), total=len(
             test_loader), desc=f'第{epoch}次测试')
         for index, (data, label) in pbar:
@@ -133,10 +135,20 @@ for epoch in range(last_epoch+1, EPOCHS+last_epoch+1):
             output = yolo(data)
             loss = criterion(output, label)
             total_loss += loss.item()
+            tp_,m_,n_ = calculate_acc_from_batch(output, label)
+            tp += tp_
+            m += m_
+            n += n_
 
         total_loss /= len(test_loader)
         test_loss.append(total_loss)
+        precision = tp / m
+        recall = tp / n
+        precisions.append(precision)
+        recalls.append(recall)
         viz.line(test_loss, list(range(len(test_loss))), win='测试Loss', opts={'title': '测试Loss'})
+        viz.line(precisions, list(range(len(precisions))), win='准确率', opts={'title': '准确率'})
+        viz.line(recalls, list(range(len(recalls))), win='召回率', opts={'title': '召回率'})
 
         torch.cuda.empty_cache()
 

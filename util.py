@@ -142,13 +142,13 @@ def labels2bbox(matrix, use_nms=True):
             # (y+row)/nrow + h/2 -> y2
             # 存储到bbox对应位置
             bbox[2*(row*7+col), :4] = torch.Tensor([(matrix[row, col, 0]+col) / 7
-                                                - matrix[row, col, 2] / 2,
-                                                (matrix[row, col, 1]+row) / 7
-                                                 - matrix[row, col, 3] / 2,
-                                                (matrix[row, col, 0]+col) / 7
-                                                 + matrix[row, col, 2] / 2,
-                                                 (matrix[row, col, 1]+row) / 7
-                                                 + matrix[row, col, 3] / 2])
+                                                    - matrix[row, col, 2] / 2,
+                                                    (matrix[row, col, 1]+row) / 7
+                                                    - matrix[row, col, 3] / 2,
+                                                    (matrix[row, col, 0]+col) / 7
+                                                    + matrix[row, col, 2] / 2,
+                                                    (matrix[row, col, 1]+row) / 7
+                                                    + matrix[row, col, 3] / 2])
 
             # 存储置信度
             bbox[2*(row*7+col), 4] = matrix[row, col, 4]
@@ -157,13 +157,19 @@ def labels2bbox(matrix, use_nms=True):
 
             # 同理，存储第2个候选框到对应位置
             bbox[2*(row*7+col)+1, :4] = torch.Tensor([(matrix[row, col, 5]+col) / 7
-                                                  - matrix[row, col, 7] / 2,
-                                                   (matrix[row, col, 6]+row) / 7
-                                                   - matrix[row, col, 8] / 2,
-                                                   (matrix[row, col, 5]+col) / 7
-                                                   + matrix[row, col, 7] / 2,
-                                                   (matrix[row, col, 6]+row) / 7
-                                                   + matrix[row, col, 8] / 2])
+                                                      - matrix[row,
+                                                               col, 7] / 2,
+                                                      (matrix[row,
+                                                       col, 6]+row) / 7
+                                                      - matrix[row,
+                                                               col, 8] / 2,
+                                                      (matrix[row,
+                                                       col, 5]+col) / 7
+                                                      + matrix[row,
+                                                               col, 7] / 2,
+                                                      (matrix[row,
+                                                       col, 6]+row) / 7
+                                                      + matrix[row, col, 8] / 2])
             # 存储置信度
             bbox[2*(row*7+col)+1, 4] = matrix[row, col, 9]
             # 存储条件概率
@@ -240,7 +246,7 @@ def draw_box(img, pos1, pos2, text, conf, color, width):
 def draw_bbox(img, bbox):
     """
     生成图片和bbox
-    : param img: 要绘制的图片 [448, 448, 3]
+    : param img: 要绘制的图片 [448,448,3]
     : param bbox: 候选框 [n, 6] -> [id,x1,y1,x2,y2,p]
     : return: img 绘制后的图片
     """
@@ -256,3 +262,83 @@ def draw_bbox(img, bbox):
         img = draw_box(img, (x1, y1), (x2, y2), name,
                        float(row['p']), color_dic[name], p*5)
     return img
+
+
+def calculate_acc(output, target, p=.1, iou_shresh=.5):
+    """
+    计算预测值和实际值之间的准确率和召回率
+    : param output: 预测值 [7,7,30]
+    : param target: 实际值 [7,7,30]
+    : param p: 置信度阈值，置信度>=p的框被认为是正样本即预测出的样本
+    : param iou_shresh，IOU阈值，当预测框和实际框的阈值>=IOU则认为预测框预测正确
+    : return tp,m,n 预测正确的样本数、识别出的样本数、实际的样本数，返回用于后续的累加计算
+    """
+
+    output_bbox = labels2bbox(output)
+    target_bbox = labels2bbox(target)
+    output_df = pd.DataFrame(output_bbox, columns=[
+                             'id', 'x1', 'y1', 'x2', 'y2', 'p']).astype(float)
+    target_df = pd.DataFrame(target_bbox, columns=[
+                             'id', 'x1', 'y1', 'x2', 'y2', 'p']).astype(float)
+    output_df = output_df[output_df['p'] >= p]
+    target_df = target_df[target_df['p'] >= p]
+
+    # 识别出的标签数量，percision = tp/(tp+fp) = tp/m
+    # precision 精度即识别出的标签中识别正确的比例
+    m = len(output_df)
+    # 标签的数量，recall = tp/(tp+fn) = tp/n
+    # recall 召回(查全)率即所有标签中被识别出的标签的比例
+    n = len(target_df)
+
+    # 预测正确的样本数，即实际标签中被预测到的标签数
+    tp = 0
+    # 遍历所有预测框和实际框的两两组合
+    for _, target_row in target_df.iterrows():
+        for _, output_row in output_df.iterrows():
+            # 所有两个框所属类别相同
+            if int(output_row['id']) == int(target_row['id']):
+                bbox1 = (float(output_row['x1']), float(output_row['y1']),
+                         float(output_row['x2']), float(output_row['y2']))
+                bbox2 = (float(target_row['x1']), float(target_row['y1']),
+                         float(target_row['x2']), float(target_row['y2']))
+                iou = calculate_iou(bbox1, bbox2)
+                if iou >= iou_shresh:
+                    tp += 1
+                    break
+    return tp, m, n
+
+
+def calculate_acc_from_batch(output, target, p=.1, iou_shresh=.5):
+    """
+    计算预测值和实际值之间的准确率和召回率
+    : param output: 预测值 [b,7,7,30]
+    : param target: 实际值 [b,7,7,30]
+    : param p: 置信度阈值，置信度>=p的框被认为是正样本即预测出的样本
+    : param iou_shresh，IOU阈值，当预测框和实际框的阈值>=IOU则认为预测框预测正确
+    : return tp,m,n 预测正确的样本数、识别出的样本数、实际的样本数，返回用于后续的累加计算
+    """
+
+    b_size = output.size(0)
+    tp, m, n = 0, 0, 0
+    for b in range(b_size):
+        tp_, m_, n_ = calculate_acc(
+            output[b], target[b], p=p, iou_shresh=iou_shresh)
+        tp += tp_
+        m += m_
+        n += n_
+    return tp, m, n
+
+
+if __name__ == '__main__':
+    from dataset import VOCDataset
+    from torch.utils.data.dataloader import DataLoader
+
+    dataset = VOCDataset('train')
+    dataloader = DataLoader(dataset, shuffle=True, batch_size=8)
+    data, target = next(iter(dataloader))
+
+    device = torch.device('cpu')
+    yolo, _ = load_model(0, device)
+    output = yolo(data)
+
+    print(calculate_acc_from_batch(output, target, iou_shresh=.05))
