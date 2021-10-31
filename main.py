@@ -27,7 +27,7 @@ from util import calculate_acc, calculate_acc_from_batch, load_model
 # BATCH_SIZE: 每次喂入的数据量
 # LR: 学习率
 EPOCHS = 200
-HISTORICAL_EPOCHS = -1
+HISTORICAL_EPOCHS = 0
 SAVE_EVERY = 1
 BATCH_SIZE = 7
 LR = 1e-3
@@ -61,7 +61,11 @@ test_loader = DataLoader(test_data, batch_size=BATCH_SIZE, shuffle=False)
 # 加载模型
 print('加载模型和优化器...')
 yolo, last_epoch = load_model(HISTORICAL_EPOCHS, device)
+<< << << < Updated upstream
 criterion = YoloV1Loss(7, 2, 5, 0.5)
+== == == =
+criterion = YoloV1Loss(7, 2, 5, .5).to(device)
+>>>>>> > Stashed changes
 optim = torch.optim.SGD(yolo.parameters(), lr=LR,
                         momentum=.9, weight_decay=5e-4)
 
@@ -93,8 +97,13 @@ viz = visdom.Visdom()
 
 # 开始训练
 print('============================================')
+<< << << < Updated upstream
 train_loss, test_loss = [], []
 precisions, recalls = [], []
+== == == =
+avg_train_loss, train_loss, test_loss = [], [], []
+total_train_loss = 0.
+>>>>>> > Stashed changes
 for epoch in range(last_epoch+1, EPOCHS+last_epoch+1):
 
     # 训练
@@ -111,15 +120,30 @@ for epoch in range(last_epoch+1, EPOCHS+last_epoch+1):
         if np.isnan(loss.item()):
             print('梯度爆炸！')
             exit(-1)
+        total_train_loss += loss.item()
         train_loss.append(loss.item())
+        avg_train_loss.append(
+            total_train_loss / ((epoch-last_epoch-1)*len(train_loader) + index + 1))
+
         if len(train_loss) > 1000:
             train_loss.pop(0)
+            avg_train_loss.pop(0)
         optim.zero_grad()
         loss.backward()
         optim.step()
 
-        viz.line(train_loss, list(range(len(train_loss))),
+        viz.line(Y=train_loss,
+                 X=list(range(len(train_loss))),
                  win='训练Loss', opts={'title': '训练Loss'})
+        viz.line(Y=train_loss,
+                 X=list(range(len(train_loss))),
+                 win='当前Loss',
+                 opts={'title': '训练Loss'})
+
+        viz.line(Y=avg_train_loss,
+                 X=list(range(len(avg_train_loss))),
+                 win='平均Loss',
+                 opts={'title': '平均Loss'})
 
     yolo_lr.step()
 
@@ -146,6 +170,7 @@ for epoch in range(last_epoch+1, EPOCHS+last_epoch+1):
 
         total_loss /= len(test_loader)
         test_loss.append(total_loss)
+<< << << < Updated upstream
         precision = tp / m
         recall = tp / n
         precisions.append(precision)
@@ -156,6 +181,10 @@ for epoch in range(last_epoch+1, EPOCHS+last_epoch+1):
                  win='准确率', opts={'title': '准确率'})
         viz.line(recalls, list(range(len(recalls))),
                  win='召回率', opts={'title': '召回率'})
+== == == =
+        viz.line(test_loss, list(range(len(test_loss))),
+                 win='测试Loss', opts={'title': '测试Loss'})
+>>>>>> > Stashed changes
 
         torch.cuda.empty_cache()
 

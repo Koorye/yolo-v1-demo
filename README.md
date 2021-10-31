@@ -117,3 +117,4 @@ python show_yolo.py
 - `yolo_v1_loss_vectorization.py`：矢量化的Yolo V1 loss计算
 - `yolo_v1_loss.py`：非矢量化的loss计算
 - `yolo_v1.py`：Yolo V1主模型，采用ResNet34代替支撑结构
+- `show_camera.py`: 调用摄像头实时进行检测

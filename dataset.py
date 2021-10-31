@@ -74,7 +74,7 @@ class VOCDataset(Dataset):
 
         self.files = []
         self.trans = transforms.Compose([
-            transforms.ToTensor()
+            transforms.ToTensor(),
         ])
         with open(os.path.join(DATA_PATH, f'{mode}.txt'), 'r') as f:
             self.files = [x.strip() for x in f]

@@ -92,6 +92,7 @@ class YoloV1Loss(nn.Module):
         # [b,S,S,30] -> [b*S*S,30] 将输出核最后一维的每一列抽出，组成二维矩阵
         # 其中矩阵的每一行代表一个网格，每一列代表各个特征[x1,y1,w1,h1,p1,x2,y2,w2,h2,p2,p...]
         # target同上
+        # noobj_pred = predict.view(noobj_mask.size())[noobj_mask].view(-1, 30)
         noobj_pred = predict[noobj_mask].view(-1, 30)
         noobj_target = target[noobj_mask].view(-1, 30)
 
@@ -125,7 +126,6 @@ class YoloV1Loss(nn.Module):
             # 计算其左上角坐标
             box1_xyxy[:, :2] = box1[:, :2] - 0.5 * box1[:, 2:4]
             # 计算其右下角坐标
-            box1_xyxy[:, :2] = box1[:, :2] - 0.5 * box1[:, 2:4]
             box1_xyxy[:, 2:4] = box1[:, :2] + 0.5 * box1[:, 2:4]
 
             # 每次取出target的一个候选框
@@ -214,12 +214,12 @@ if __name__ == '__main__':
     yolo = YoloV1().to(device)
     output = yolo(data.unsqueeze(0).to(device))
 
-    print(target[:,:,0])
-    print(target[:,:,1])
-    print(target[:,:,2])
-    print(target[:,:,3])
-    print(target[:,:,10:].sum(-1))
-    print(output)
+    # print(target[:,:,0])
+    # print(target[:,:,1])
+    # print(target[:,:,2])
+    # print(target[:,:,3])
+    # print(target[:,:,10:].sum(-1))
+    # print(output)
 
     loss = loss(output.to(device), target.unsqueeze(0).to(device))
     print(loss)
