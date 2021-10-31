@@ -61,7 +61,7 @@ test_loader = DataLoader(test_data, batch_size=BATCH_SIZE, shuffle=False)
 # 加载模型
 print('加载模型和优化器...')
 yolo, last_epoch = load_model(HISTORICAL_EPOCHS, device)
-criterion = YoloV1Loss(7, 2, 5, 0.5, device)
+criterion = YoloV1Loss(7, 2, 5, 0.5)
 optim = torch.optim.SGD(yolo.parameters(), lr=LR,
                         momentum=.9, weight_decay=5e-4)
 
@@ -138,6 +138,7 @@ for epoch in range(last_epoch+1, EPOCHS+last_epoch+1):
             output = yolo(data)
             loss = criterion(output, label)
             total_loss += loss.item()
+
             tp_, m_, n_ = calculate_acc_from_batch(output, label)
             tp += tp_
             m += m_

@@ -76,13 +76,8 @@ class VOCDataset(Dataset):
         self.trans = transforms.Compose([
             transforms.ToTensor()
         ])
-
-        if mode == 'train':
-            with open(os.path.join(DATA_PATH, 'train.txt'), 'r') as f:
-                self.files = [x.strip() for x in f]
-        elif mode == 'test':
-            with open(os.path.join(DATA_PATH, 'val.txt'), 'r') as f:
-                self.files = [x.strip() for x in f]
+        with open(os.path.join(DATA_PATH, f'{mode}.txt'), 'r') as f:
+            self.files = [x.strip() for x in f]
 
     def __len__(self):
         return len(self.files)

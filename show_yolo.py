@@ -12,7 +12,7 @@ import visdom
 from tqdm import tqdm
 from torchvision.transforms import transforms
 
-from util import draw_bbox, labels2bbox, load_model
+from util import draw_bbox, label2bbox, load_model
 from dataset import VOCDataset
 
 # OUTPUT_MODEL_PATH: 输出模型路径
@@ -60,8 +60,8 @@ def draw_img_with_bbox(yolo, show_range, save_path, start_index=0, save=False):
             img = np.uint8(data.transpose(
                 0, 1).transpose(1, 2).cpu().numpy() * 255)
             img2 = img.copy()
-            output_bbox = labels2bbox(output.squeeze(0))
-            target_bbox = labels2bbox(target)
+            output_bbox = label2bbox(output.squeeze(0))
+            target_bbox = label2bbox(target)
 
             output_img = draw_bbox(img, output_bbox)
             target_img = draw_bbox(img2, target_bbox)

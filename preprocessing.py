@@ -8,6 +8,7 @@ import cv2
 import numpy as np
 import os
 import pandas as pd
+import random
 import shutil
 from tqdm import tqdm
 
@@ -139,8 +140,29 @@ def copy_train_and_test():
     copy_root = os.path.join(DATA_PATH, 'ImageSets', 'Main')
     shutil.copyfile(os.path.join(copy_root, 'train.txt'), os.path.join(OUTPUT_IMG_PATH, 'train.txt'))
     shutil.copyfile(os.path.join(copy_root, 'val.txt'), os.path.join(OUTPUT_IMG_PATH, 'val.txt'))
+    shutil.copyfile(os.path.join(copy_root, 'trainval.txt'), os.path.join(OUTPUT_IMG_PATH, 'trainval.txt'))
+
+def train_test_split(train_rate=.8, seed=None):
+    """
+    根据所有图片随机切分训练集和测试集
+    """
+    
+    if seed is not None:
+        random.seed(seed)
+    files = [x.split('.')[0] for x in os.listdir(OUTPUT_IMG_PATH)]
+    train_files = random.sample(files, int(train_rate*len(files)))
+    test_files = [x for x in files if x not in train_files]
+    with open(os.path.join(OUTPUT_PATH, 'train.txt'), 'w') as f:
+        pbar = tqdm(train_files, total=len(train_files), desc='生成训练文件')
+        for file in pbar:
+            f.write(file+'\n')
+    with open(os.path.join(OUTPUT_PATH, 'test.txt'), 'w') as f:
+        pbar = tqdm(test_files, total=len(test_files), desc='生成测试文件')
+        for file in pbar:
+            f.write(file+'\n')
 
 if __name__ == '__main__':
     generate_label()
     generate_img()
-    copy_train_and_test()
+    # copy_train_and_test()
+    train_test_split()

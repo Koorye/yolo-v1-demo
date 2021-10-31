@@ -5,10 +5,15 @@
 # @Desc: 工具类，包含模型加载、IOU计算、输出核解码、可视化等功能
 
 import cv2
+import datetime
+import matplotlib.pyplot as plt
 import os
 import numpy as np
 import pandas as pd
 import torch
+from torch.utils.data.dataloader import DataLoader
+from tqdm import tqdm
+from dataset import VOCDataset
 
 from yolo_v1 import YoloV1
 
@@ -63,128 +68,138 @@ def calculate_iou(bbox1, bbox2):
         return 0
 
 
-def NMS(bbox, conf_thresh=0.1, iou_thresh=0.3):
-    """
-    NMS非极大值抑制
-    : param bbox: [n,25] -> [x1,y1,x2,y2,conf,p1,p2,...]
-    : param conf_thresh: 置信度阈值，小于该阈值直接排除
-    : param iou_thresh: IOU阈值，大于该阈值则排除置信度小的候选框
-    : return: 抑制后的候选框 [m,6] -> [id,x1,y1,x2,y2,conf]
-    """
+def NMS(bboxes, scores, threshold=0.5):
+    '''
+    非极大值抑制
+    : param bboxes: 预测框集 [n,4]，每一行为一个预测框 [x1,y1,x2,y2]
+    : param scores: 分数，即预测概率 置信度x条件概率 [n,] -> [p1,p2,...]
+    : param threshold: IOU阈值
+    : return keep 张量，每个元素表示保留的预测框下标(所在的行数) -> [a1,a2,...]
+    '''
 
-    # 得到每个候选框的条件概率 [n,25] -> [n,20]
-    bbox_prob = bbox[:, 5:].clone()
+    # 获取每个预测框的坐标并计算面积
+    x1 = bboxes[:, 0]
+    y1 = bboxes[:, 1]
+    x2 = bboxes[:, 2]
+    y2 = bboxes[:, 3]
+    areas = (x2-x1) * (y2-y1)
 
-    # 得到每个候选框的置信度并扩展 [n,25] -> [n,] -> [n,1] -> [n,20]
-    bbox_confi = bbox[:, 4].clone().unsqueeze(1).expand_as(bbox_prob)
+    # 对置信度倒序排序
+    _, order = scores.sort(0, descending=True)
+    keep = []
 
-    # 相乘得到每个候选框预测每个物体的概率 [n,20] * [n,20] -> [n,20]
-    bbox_cls_spec_conf = bbox_confi*bbox_prob
+    # 从第一名的预测框开始
+    while order.numel() > 0:
+        # 将其加入列表选中
+        if list(order.size()) == []:
+            i = order
+        else:
+            i = order[0]
+        keep.append(i)
 
-    # 排除低于阈值的候选框 [n,20]
-    bbox_cls_spec_conf[bbox_cls_spec_conf <= conf_thresh] = 0
+        # 如果仅剩一个待选中的预测框，结束循环
+        if order.numel() == 1:
+            break
 
-    # 遍历每一种物体
-    for c in range(20):
-        # 对所有候选框进行排序，排序依据为该类物体的概率，倒序排序并取索引 [20] -> [r1,r2,...,r20]分别表示第i个候选框的排名
-        rank = torch.sort(bbox_cls_spec_conf[:, c], descending=True).indices
-        # 遍历每个候选框
-        for i in range(98):
-            # 如果第i个候选框的预测概率不为0
-            if bbox_cls_spec_conf[rank[i], c] != 0:
-                # 遍历小于该候选框排名的所有候选框
-                for j in range(i+1, 98):
-                    # 如果预测概率不为0
-                    if bbox_cls_spec_conf[rank[j], c] != 0:
-                        # 如果IOU大于阈值，将后者预测概率置0
-                        iou = calculate_iou(
-                            bbox[rank[i], 0:4], bbox[rank[j], 0:4])
-                        if iou > iou_thresh:  # 根据iou进行非极大值抑制抑制
-                            bbox_cls_spec_conf[rank[j], c] = 0
+        # 将其余预测框的坐标归一到选中预测框的坐标范围内
+        # 即其余预测框左上角坐标(x1,y1)>=(x1_0,y1_0)，(x2,y2)<=(x2_0,y2_0)
+        # 其中x1,y1,x2,y2表示预测框的左上角和右下角的坐标
+        # xi_0,yi_0表示选中的预测框的坐标
+        xx1 = x1[order[1:]].clamp(min=x1[i])
+        yy1 = y1[order[1:]].clamp(min=y1[i])
+        xx2 = x2[order[1:]].clamp(max=x2[i])
+        yy2 = y2[order[1:]].clamp(max=y2[i])
 
-    # 筛选最大预测概率大于0(NMS抑制后有概率即表明有探测到物体)的候选框 [n,25] -> [m,25]
-    # m为筛选后的候选框数量，即每一行是一个候选框
-    bbox = bbox[torch.max(bbox_cls_spec_conf, dim=1).values > 0]
+        # 计算交集的面积
+        w = (xx2-xx1).clamp(min=0)
+        h = (yy2-yy1).clamp(min=0)
+        inter = w*h
 
-    # 筛选最大预测概率大于0的候选框 [n,25] -> [m,25]
-    bbox_cls_spec_conf = bbox_cls_spec_conf[torch.max(
-        bbox_cls_spec_conf, dim=1).values > 0]
+        # 计算IOU = 交集的面积 / (预测框1的面积+预测框2的面积-交集的面积)
+        ovr = inter / (areas[i] + areas[order[1:]] - inter)
 
-    # 创建尺寸为[m,6]的矩阵用于存储筛选后的候选框
-    res = torch.ones((bbox.size(0), 6))
-
-    # 存储x1,y1,x2,y2
-    res[:, 1:5] = bbox[:, 0:4]
-    # 存储类别所属的id
-    res[:, 0] = torch.argmax(bbox[:, 5:], dim=1).int()
-    # 存储概率的最大值
-    res[:, 5] = torch.max(bbox_cls_spec_conf, dim=1).values
-    return res
+        # 找到IOU小于阈值的预测框在排名中的在ovr列表中的下标
+        ids = (ovr <= threshold).nonzero().squeeze()
+        # 没有找到，结束循环
+        if ids.numel() == 0:
+            break
+        # 更新待选预测框列表，筛选小于阈值的预测框(去除大于等于阈值的预测框，即与选中框重复的预测框)，同时删除选中框
+        # 之所以+1，是为了使ovr的元素与order的元素对齐(ovr少了选中框位于下标0)
+        order = order[ids+1]
+    return torch.LongTensor(keep)
 
 
-def labels2bbox(matrix, use_nms=True):
-    """
-    将[7,7,30]的输出核转换为[m,6]的候选框
-    : param matrix: 输出核 [7,7,30]
-    : param use_nms: 是否使用NMS，不使用将保留所有候选框
-    : return: 候选框 [m,6] -> [id,x1,y1,x2,y2,conf]，其中m表示候选框的数量
-    """
+def label2bbox(pred):
+    '''
+    输出核转预测框
+    : param pred: 预测框 [7,7,30] -> [x,y,w,h,conf,x,y,w,h,conf,p1,p2,...]
+    : return: bbox [n,6] -> [id,x1,y1,x2,y2,conf]
+    '''
 
-    # 创建尺寸为[98,25]的矩阵用于存储候选框 -> [x1,y1,x2,y2,conf,p1,p2,...]
-    bbox = torch.zeros((98, 25))
-    for row in range(7):
-        for col in range(7):
-            # 将第i行第j列网格的坐标信息x,y(相对值),w,h
-            # 转换为x1,y1,x2,y2
-            # (x+col)/ncol - w/2 -> x1
-            # (y+row)/nrow - h/2 -> y1
-            # (x+col)/ncol + w/2 -> x2
-            # (y+row)/nrow + h/2 -> y2
-            # 存储到bbox对应位置
-            bbox[2*(row*7+col), :4] = torch.Tensor([(matrix[row, col, 0]+col) / 7
-                                                    - matrix[row, col, 2] / 2,
-                                                    (matrix[row, col, 1]+row) / 7
-                                                    - matrix[row, col, 3] / 2,
-                                                    (matrix[row, col, 0]+col) / 7
-                                                    + matrix[row, col, 2] / 2,
-                                                    (matrix[row, col, 1]+row) / 7
-                                                    + matrix[row, col, 3] / 2])
+    device = pred.device
+    grid_num = 7
+    boxes = []
+    cls_indexs = []
+    probs = []
+    cell_size = 1./grid_num
+    pred = pred.data
 
-            # 存储置信度
-            bbox[2*(row*7+col), 4] = matrix[row, col, 4]
-            # 存储条件概率
-            bbox[2*(row*7+col), 5:] = matrix[row, col, 10:]
+    # 第一个预测框和第二个预测框的置信度 [7,7,30] -> [7,7] -> [7,7,1], [7,7,1]+[7,7,1] -> [7,7,2]
+    contain1 = pred[:, :, 4].unsqueeze(2)
+    contain2 = pred[:, :, 9].unsqueeze(2)
+    contain = torch.cat((contain1, contain2), 2)
 
-            # 同理，存储第2个候选框到对应位置
-            bbox[2*(row*7+col)+1, :4] = torch.Tensor([(matrix[row, col, 5]+col) / 7
-                                                      - matrix[row,
-                                                               col, 7] / 2,
-                                                      (matrix[row,
-                                                       col, 6]+row) / 7
-                                                      - matrix[row,
-                                                               col, 8] / 2,
-                                                      (matrix[row,
-                                                       col, 5]+col) / 7
-                                                      + matrix[row,
-                                                               col, 7] / 2,
-                                                      (matrix[row,
-                                                       col, 6]+row) / 7
-                                                      + matrix[row, col, 8] / 2])
-            # 存储置信度
-            bbox[2*(row*7+col)+1, 4] = matrix[row, col, 9]
-            # 存储条件概率
-            bbox[2*(row*7+col)+1, 5:] = matrix[row, col, 10:]
-    if use_nms:
-        # NMS抑制 [98,25] -> [m,6]
-        return NMS(bbox)
+    # 置信度大于阈值的预测框置1
+    mask1 = contain > 0.1
+    # 所有预测框中置信度最大的置1
+    mask2 = (contain == contain.max())
+    # 置信度大于阈值或置信度最大(至少有一个预测框？)的预测框置1
+    mask = (mask1+mask2).gt(0)
 
-    # 不经过NMS，直接筛选结果
-    res = torch.zeros(98, 6)
-    # 获取预测概率最大的类别的id并存储
-    res[:, 0] = torch.argmax(bbox[:, 5:], dim=1).int()
-    # 获取每个类别的坐标和置信度x1,y1,x2,y2,conf并存储
-    res[:, 1:6] = bbox[:, :5]
-    return res
+    # 遍历每个网格的每个预测框
+    for i in range(grid_num):
+        for j in range(grid_num):
+            for b in range(2):
+                # 如果满足上述条件，即大于阈值或置信度最大
+                if mask[i, j, b] == 1:
+                    # 得到预测框 -> [x,y,w,h]
+                    box = pred[i, j, b*5:b*5+4]
+                    contain_prob = torch.FloatTensor(
+                        [pred[i, j, b*5+4]]).to(device)
+                    # 得到预测框位于网格的左上角坐标 -> 网格行、列数x每个网格的尺寸
+                    xy = torch.FloatTensor([j, i]).to(device)*cell_size
+                    box_xy = torch.FloatTensor(box.size()).to(device)
+                    # 将x,y转换为绝对坐标
+                    box[:2] = box[:2]*cell_size + xy
+                    # 计算左上角和右下角的绝对坐标(x1,y1),(x2,y2)放入box_xy
+                    box_xy[:2] = box[:2] - 0.5*box[2:]
+                    box_xy[2:] = box[:2] + 0.5*box[2:]
+
+                    # 得到该网格预测物体的最大条件概率和对应物体类别的下标，均为标量
+                    max_prob, cls_index = torch.max(pred[i, j, 10:], 0)
+                    # 如果置信度x条件概率>0.1，将其作为一个预测框
+                    if float((contain_prob*max_prob)[0]) > 0.1:
+                        boxes.append(box_xy.view(1, 4))
+                        cls_indexs.append(torch.Tensor([cls_index]).to(device))
+                        probs.append(contain_prob*max_prob)
+
+    # 如果没有筛选出预测框，输出空
+    if len(boxes) == 0:
+        boxes = torch.zeros((1, 4))
+        probs = torch.zeros(1)
+        cls_indexs = torch.zeros(1)
+        return torch.cat([boxes, cls_indexs.unsqueeze(1), probs.unsqueeze(1)], -1)
+    # 否则对预测框作拼接后经NMS筛选并返回
+    # boxes [m,4] -> [x1,y1,x2,y1] 每个元素为第i个预测框的坐标信息
+    # probs [m,] -> [p1,p2,...] 每个元素为第i个预测框的预测概率
+    # cls_indexs [m,] -> [class1,class2,...] 每个元素为第i个预测框的类别下标
+    # keep [n,] -> [a1,a2,...] 每个元素为筛选后保留的预测框的下标
+    else:
+        boxes = torch.cat(boxes, 0)
+        probs = torch.cat(probs, 0)
+        cls_indexs = torch.cat(cls_indexs, 0)
+        keep = NMS(boxes, probs)
+        return torch.cat([cls_indexs[keep].unsqueeze(1), boxes[keep], probs[keep].unsqueeze(1)], -1)
 
 
 def load_model(historical_epoch, device):
@@ -201,8 +216,6 @@ def load_model(historical_epoch, device):
         return yolo, last_epoch
 
     if historical_epoch > 0:
-        yolo.load_state_dict(torch.load(os.path.join(
-            OUTPUT_MODEL_PATH, f'epoch{historical_epoch}.pth')))
         last_epoch = historical_epoch
     elif historical_epoch == -1:
         epoch_files = os.listdir(OUTPUT_MODEL_PATH)
@@ -274,8 +287,9 @@ def calculate_acc(output, target, p=.1, iou_shresh=.5):
     : return tp,m,n 预测正确的样本数、识别出的样本数、实际的样本数，返回用于后续的累加计算
     """
 
-    output_bbox = labels2bbox(output)
-    target_bbox = labels2bbox(target)
+    output_bbox = label2bbox(output).detach().numpy()
+    target_bbox = label2bbox(target).detach().numpy()
+
     output_df = pd.DataFrame(output_bbox, columns=[
                              'id', 'x1', 'y1', 'x2', 'y2', 'p']).astype(float)
     target_df = pd.DataFrame(target_bbox, columns=[
@@ -294,7 +308,9 @@ def calculate_acc(output, target, p=.1, iou_shresh=.5):
     tp = 0
     # 遍历所有预测框和实际框的两两组合
     for _, target_row in target_df.iterrows():
-        for _, output_row in output_df.iterrows():
+        target_id = int(target_row['id'])
+        output_df_ = output_df[output_df['id'] == target_id]
+        for _, output_row in output_df_.iterrows():
             # 所有两个框所属类别相同
             if int(output_row['id']) == int(target_row['id']):
                 bbox1 = (float(output_row['x1']), float(output_row['y1']),
@@ -318,36 +334,42 @@ def calculate_acc_from_batch(output, target, p=.1, iou_shresh=.5):
     : return tp,m,n 预测正确的样本数、识别出的样本数、实际的样本数，返回用于后续的累加计算
     """
 
-    b_size = output.size(0)
-    tp, m, n = 0, 0, 0
-    for b in range(b_size):
-        tp_, m_, n_ = calculate_acc(
-            output[b], target[b], p=p, iou_shresh=iou_shresh)
-        tp += tp_
-        m += m_
-        n += n_
-    return tp, m, n
+    with torch.no_grad():
+        b_size = output.size(0)
+        tp, m, n = 0, 0, 0
+        for b in range(b_size):
+            tp_, m_, n_ = calculate_acc(
+                output[b], target[b], p=p, iou_shresh=iou_shresh)
+            tp += tp_
+            m += m_
+            n += n_
+        return tp, m, n
 
 
 if __name__ == '__main__':
-    from dataset import VOCDataset
-    import datetime
-    from torch.utils.data.dataloader import DataLoader
-
-    dataset = VOCDataset('train')
-    dataloader = DataLoader(dataset, shuffle=True, batch_size=8)
+    device = torch.device('cuda')
+    cpu = torch.device('cpu')
+    dataset = VOCDataset(mode='test')
+    dataloader = DataLoader(dataset, shuffle=False, batch_size=8)
     data, target = next(iter(dataloader))
+    label2bbox(target)
+    # precisions, recalls = [], []
+    # with torch.no_grad():
+    # for epoch in range(1,43+1):
+    # yolo, _ = load_model(10, device)
+    # yolo.eval()
 
-    device = torch.device('cpu')
-    yolo, _ = load_model(0, device)
-    output = yolo(data)
-
-    start_time = datetime.datetime.now()
-    print(calculate_acc_from_batch(output, target))
-    end_time = datetime.datetime.now()
-    print(end_time-start_time)
-
-    start_time = datetime.datetime.now()
-    print(calculate_acc_from_batch(target, target, iou_shresh=.5))
-    end_time = datetime.datetime.now()
-    print(end_time-start_time)
+    # pbar = tqdm(dataloader, total=len(dataloader))
+    # tp, m, n = 0,0,0
+    # for index, (data, target) in enumerate(pbar):
+    # output = yolo(data.to(device))
+    # tp_,m_,n_ = calculate_acc_from_batch(output.to(cpu), target.to(cpu))
+    # tp += tp_
+    # m += m_
+    # n += n_
+    # precisions.append(tp/m)
+    # recalls.append(tp/n)
+    # plt.plot(precisions, label='precision')
+    # plt.plot(recalls, label='recall')
+    # plt.legend()
+    # plt.show()

@@ -47,13 +47,12 @@ def compute_iou(box1, box2):
 
 
 class YoloV1Loss(nn.Module):
-    def __init__(self, S, B, l_coord, l_noobj, device):
+    def __init__(self, S, B, l_coord, l_noobj):
         super(YoloV1Loss, self).__init__()
         self.S = S
         self.B = B
         self.l_coord = l_coord
         self.l_noobj = l_noobj
-        self.device = device
 
     def forward(self, predict, target):
         """
@@ -62,7 +61,8 @@ class YoloV1Loss(nn.Module):
         :return: loss
         """
 
-        N = predict.size()[0]
+        device = predict.device
+        N = predict.size(0)
 
         # 将target中置信度>0的候选框对应的网格位置置为True，即保留有物体的网格
         coord_mask = target[:, :, :, 4] > 0
@@ -79,7 +79,7 @@ class YoloV1Loss(nn.Module):
         # 之后再将其最后一维的前10个元素抽出
         # [b*S*S,10] -> [b*S*S*2,5] 组成二维矩阵
         # 其中矩阵的每一行代表一个候选框，每一列代表候选框的各个特征[x,y,w,h,p]
-        coord_pred = predict.view(coord_mask.size())[coord_mask].view(-1, 30)
+        coord_pred = predict[coord_mask].view(-1, 30)
         coord_box_pred = coord_pred[:, :10].contiguous().view(-1, 5)
         coord_class_pred = coord_pred[:, 10:]
 
@@ -92,12 +92,12 @@ class YoloV1Loss(nn.Module):
         # [b,S,S,30] -> [b*S*S,30] 将输出核最后一维的每一列抽出，组成二维矩阵
         # 其中矩阵的每一行代表一个网格，每一列代表各个特征[x1,y1,w1,h1,p1,x2,y2,w2,h2,p2,p...]
         # target同上
-        noobj_pred = predict.view(noobj_mask.size())[noobj_mask].view(-1, 30)
+        noobj_pred = predict[noobj_mask].view(-1, 30)
         noobj_target = target[noobj_mask].view(-1, 30)
 
         # 设置尺寸同样为[b*S*S,30]的BoolTensor
         # 将第4、9列，即置信度对应的列置1，其余列置0
-        noobj_pred_mask = torch.BoolTensor(noobj_pred.size()).to(self.device)
+        noobj_pred_mask = torch.BoolTensor(noobj_pred.size()).to(device)
         noobj_pred_mask.zero_()
         noobj_pred_mask[:, 4] = 1
         noobj_pred_mask[:, 9] = 1
@@ -109,18 +109,16 @@ class YoloV1Loss(nn.Module):
 
         # 设置尺寸为[b*S*S*2,5]的BoolTensor
         # 分别用于探测物体的候选框和不用于探测物体的候选框的计算
-        coord_response_mask = torch.BoolTensor(
-            coord_box_target.size()).to(self.device)
+        coord_response_mask = torch.BoolTensor(coord_box_target.size()).to(device)
         coord_response_mask.zero_()
-        coord_not_response_mask = torch.BoolTensor(
-            coord_box_target.size()).to(self.device)
+        coord_not_response_mask = torch.BoolTensor(coord_box_target.size()).to(device)
         coord_not_response_mask.zero_()
 
         # 设置尺寸为[b*S*S*2,5]的BoolTensor
         # 用于IOU计算结果的存储
-        box_target_iou = torch.zeros(coord_box_target.size()).to(self.device)
+        box_target_iou = torch.zeros(coord_box_target.size()).to(device)
 
-        for i in range(0, coord_box_target.size()[0], 2):
+        for i in range(0, coord_box_target.size(0), 2):
             # 每次取出predict中属于同一个网格的两个候选框
             box1 = coord_box_pred[i:i + 2]
             box1_xyxy = Variable(torch.FloatTensor(box1.size()))
@@ -147,7 +145,7 @@ class YoloV1Loss(nn.Module):
 
             # 对第0维取最大值，即取得IOU最大的候选框和对应下标
             max_iou, max_index = iou.max(0)
-            max_index = max_index.data.to(self.device)
+            max_index = max_index.data.to(device)
 
             # 将用于探测物体的候选框对应位置1，其余位为0
             coord_response_mask[i + max_index] = 1
@@ -155,9 +153,8 @@ class YoloV1Loss(nn.Module):
             coord_not_response_mask[i + 1 - max_index] = 1
 
             # 存储IOU最大值的计算结果到候选框对应位置
-            box_target_iou[i + max_index, torch.LongTensor([4]).to(
-                self.device)] = (max_iou).data.to(self.device)
-        box_target_iou = Variable(box_target_iou).to(self.device)
+            box_target_iou[i + max_index, torch.LongTensor([4]).to(device)] = (max_iou).data.to(device)
+        box_target_iou = Variable(box_target_iou).to(device)
 
         # 筛选出用于探测物体的候选框
         coord_box_pred_response = coord_box_pred[coord_response_mask].view(
@@ -209,13 +206,13 @@ if __name__ == '__main__':
     from dataset import VOCDataset
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    loss = YoloV1Loss(7, 2, 5, .5, device)
+    loss = YoloV1Loss(7, 2, 5, .5).to(device)
     
     dataset = VOCDataset()
     data, target = dataset.__getitem__(0)
 
-    yolo = YoloV1()
-    output = yolo(data.unsqueeze(0))
+    yolo = YoloV1().to(device)
+    output = yolo(data.unsqueeze(0).to(device))
 
     print(target[:,:,0])
     print(target[:,:,1])
@@ -224,5 +221,5 @@ if __name__ == '__main__':
     print(target[:,:,10:].sum(-1))
     print(output)
 
-    loss = loss(target, output)
+    loss = loss(output.to(device), target.unsqueeze(0).to(device))
     print(loss)
