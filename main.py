@@ -15,7 +15,7 @@ import visdom
 from dataset import VOCDataset
 from show_yolo import draw_img_with_bbox
 from yolo_v1_loss_vectorization import YoloV1Loss
-from util import calculate_acc, calculate_acc_from_batch, load_model
+from util import calculate_acc_from_batch, load_model
 
 # 初始化参数
 # EPOCHS: 总的训练次数
@@ -27,7 +27,7 @@ from util import calculate_acc, calculate_acc_from_batch, load_model
 # BATCH_SIZE: 每次喂入的数据量
 # LR: 学习率
 EPOCHS = 200
-HISTORICAL_EPOCHS = 0
+HISTORICAL_EPOCHS = -1
 SAVE_EVERY = 1
 BATCH_SIZE = 7
 LR = 1e-3
@@ -50,6 +50,7 @@ if torch.cuda.is_available():
 else:
     print('CUDA不可用，使用CPU')
     device = torch.device('cpu')
+cpu = torch.device('cpu')
 
 # 加载数据集和加载器
 print('加载数据集...')
@@ -117,7 +118,7 @@ for epoch in range(last_epoch+1, EPOCHS+last_epoch+1):
         avg_train_loss.append(
             total_train_loss / ((epoch-last_epoch-1)*len(train_loader) + index + 1))
 
-        if len(train_loss) > 1000:
+        if len(train_loss) > 5000:
             train_loss.pop(0)
             avg_train_loss.pop(0)
         optim.zero_grad()
@@ -127,7 +128,7 @@ for epoch in range(last_epoch+1, EPOCHS+last_epoch+1):
         viz.line(Y=train_loss,
                  X=list(range(len(train_loss))),
                  win='当前Loss',
-                 opts={'title': '训练Loss'})
+                 opts={'title': '当前Loss'})
 
         viz.line(Y=avg_train_loss,
                  X=list(range(len(avg_train_loss))),
@@ -152,7 +153,7 @@ for epoch in range(last_epoch+1, EPOCHS+last_epoch+1):
             loss = criterion(output, label)
             total_loss += loss.item()
 
-            tp_, m_, n_ = calculate_acc_from_batch(output, label)
+            tp_, m_, n_ = calculate_acc_from_batch(output.to(cpu), label.to(cpu))
             tp += tp_
             m += m_
             n += n_

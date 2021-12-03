@@ -351,25 +351,23 @@ if __name__ == '__main__':
     cpu = torch.device('cpu')
     dataset = VOCDataset(mode='test')
     dataloader = DataLoader(dataset, shuffle=False, batch_size=8)
-    data, target = next(iter(dataloader))
-    label2bbox(target)
-    # precisions, recalls = [], []
-    # with torch.no_grad():
-    # for epoch in range(1,43+1):
-    # yolo, _ = load_model(10, device)
-    # yolo.eval()
+    precisions, recalls = [], []
+    with torch.no_grad():
+        for epoch in range(1,43+1,5):
+            yolo, _ = load_model(epoch, device)
+            yolo.eval()
 
-    # pbar = tqdm(dataloader, total=len(dataloader))
-    # tp, m, n = 0,0,0
-    # for index, (data, target) in enumerate(pbar):
-    # output = yolo(data.to(device))
-    # tp_,m_,n_ = calculate_acc_from_batch(output.to(cpu), target.to(cpu))
-    # tp += tp_
-    # m += m_
-    # n += n_
-    # precisions.append(tp/m)
-    # recalls.append(tp/n)
-    # plt.plot(precisions, label='precision')
-    # plt.plot(recalls, label='recall')
-    # plt.legend()
-    # plt.show()
+            pbar = tqdm(dataloader, total=len(dataloader))
+            tp, m, n = 0,0,0
+            for index, (data, target) in enumerate(pbar):
+                output = yolo(data.to(device))
+                tp_,m_,n_ = calculate_acc_from_batch(output.to(cpu), target.to(cpu))
+                tp += tp_
+                m += m_
+                n += n_
+            precisions.append(tp/m)
+            recalls.append(tp/n)
+    plt.plot(precisions, label='precision')
+    plt.plot(recalls, label='recall')
+    plt.legend()
+    plt.show()
